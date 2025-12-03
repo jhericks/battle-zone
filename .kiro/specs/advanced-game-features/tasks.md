@@ -40,19 +40,19 @@
   - Add particle lifecycle management (lifetime countdown and removal)
   - _Requirements: 2.1, 2.2, 2.3, 2.5_
 
-- [ ]* 4.1 Write property test for particle creation location
+- [x] 4.1 Write property test for particle creation location
   - **Property 4: Tank hit creates particles at correct location**
   - **Validates: Requirements 2.1**
 
-- [ ]* 4.2 Write property test for particle velocity radiation
+- [x] 4.2 Write property test for particle velocity radiation
   - **Property 5: Particle velocities radiate outward**
   - **Validates: Requirements 2.2**
 
-- [ ]* 4.3 Write property test for particle physics
+- [x] 4.3 Write property test for particle physics
   - **Property 6: Particle physics updates correctly**
   - **Validates: Requirements 2.3**
 
-- [ ]* 4.4 Write property test for particle removal
+- [x] 4.4 Write property test for particle removal
   - **Property 7: Expired particles are removed**
   - **Validates: Requirements 2.5**
 
@@ -73,11 +73,11 @@
   - Add field-of-view check (180° forward arc)
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
-- [ ]* 7.1 Write property test for field of view blocking
+- [x] 7.1 Write property test for field of view blocking
   - **Property 12: Field of view blocks rear detection**
   - **Validates: Requirements 4.3**
 
-- [ ]* 7.2 Write property test for obstacle blocking
+- [x] 7.2 Write property test for obstacle blocking
   - **Property 13: Obstacles block line of sight**
   - **Validates: Requirements 4.5**
 
@@ -89,15 +89,15 @@
   - Update enemy rotation and firing to respect LOS
   - _Requirements: 4.4, 4.6, 4.7, 4.10, 4.11_
 
-- [ ]* 8.1 Write property test for blocked LOS prevents rotation
+- [x] 8.1 Write property test for blocked LOS prevents rotation
   - **Property 14: Blocked LOS prevents rotation**
   - **Validates: Requirements 4.6**
 
-- [ ]* 8.2 Write property test for blocked LOS prevents firing
+- [x] 8.2 Write property test for blocked LOS prevents firing
   - **Property 15: Blocked LOS prevents firing**
   - **Validates: Requirements 4.7**
 
-- [ ]* 8.3 Write property test for clear LOS enables behavior
+- [x] 8.3 Write property test for clear LOS enables behavior
   - **Property 18: Clear LOS enables normal behavior**
   - **Validates: Requirements 4.10**
 
@@ -107,11 +107,11 @@
   - Trigger enemy searching state when player fires
   - _Requirements: 4.8, 4.9_
 
-- [ ]* 9.1 Write property test for position recording
+- [x] 9.1 Write property test for position recording
   - **Property 16: Player firing records position**
   - **Validates: Requirements 4.8**
 
-- [ ]* 9.2 Write property test for enemy movement toward last known position
+- [x] 9.2 Write property test for enemy movement toward last known position
   - **Property 17: Enemy moves toward last known position**
   - **Validates: Requirements 4.9**
 
