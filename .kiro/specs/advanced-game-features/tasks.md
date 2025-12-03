@@ -165,17 +165,17 @@
   - Render particles in 3D space
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
 
-- [ ] 15. Update particle system for 3D
+- [x] 15. Update particle system for 3D
   - Add z coordinate to particle objects
   - Add vz (vertical velocity) to particles
   - Update particle physics to handle 3D movement
   - Update drawParticles() to use 3D projection
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 16. Final Checkpoint - Ensure all tests pass
+- [x] 16. Final Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 17. Polish and optimization
+- [x] 17. Polish and optimization
   - Add object culling (don't render objects outside view frustum)
   - Optimize particle count and rendering
   - Tune audio levels and timing

@@ -14,6 +14,12 @@ const ENEMY_BASE_ROTATION_SPEED = 0.0028;
 const ENEMY_FIRE_COOLDOWN = 120; // frames
 const ENEMY_SPEED_INCREASE = 1.1; // 10% increase per kill
 
+// Optimization constants
+const MAX_PARTICLES = 100; // Maximum active particles
+const PARTICLE_CULL_DISTANCE = 800; // Don't render particles beyond this distance
+const FRUSTUM_CULL_DISTANCE = 1200; // Don't render objects beyond this distance
+const AUDIO_MAX_VOLUME = 0.25; // Reduced from 0.3-0.5 for better balance
+
 // Audio System
 const audioSystem = {
     context: null,
@@ -61,23 +67,24 @@ const audioSystem = {
         
         // Frequency sweep from 800Hz to 400Hz
         oscillator.frequency.setValueAtTime(800, now);
-        oscillator.frequency.exponentialRampToValueAtTime(400, now + 0.1);
+        oscillator.frequency.exponentialRampToValueAtTime(400, now + 0.08);
         
-        // Volume envelope
-        gainNode.gain.setValueAtTime(0.3, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        // Volume envelope - tuned for better balance
+        gainNode.gain.setValueAtTime(AUDIO_MAX_VOLUME, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
         
         oscillator.start(now);
-        oscillator.stop(now + 0.1);
+        oscillator.stop(now + 0.08);
     },
     
     playExplosion() {
         if (!this.enabled || !this.context) return;
         
         const now = this.context.currentTime;
+        const duration = 0.4; // Shortened for snappier feel
         
         // Create noise buffer for explosion
-        const bufferSize = this.context.sampleRate * 0.5;
+        const bufferSize = this.context.sampleRate * duration;
         const buffer = this.context.createBuffer(1, bufferSize, this.context.sampleRate);
         const data = buffer.getChannelData(0);
         
@@ -93,7 +100,7 @@ const audioSystem = {
         const filter = this.context.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(1000, now);
-        filter.frequency.exponentialRampToValueAtTime(100, now + 0.5);
+        filter.frequency.exponentialRampToValueAtTime(100, now + duration);
         
         const gainNode = this.context.createGain();
         
@@ -101,9 +108,9 @@ const audioSystem = {
         filter.connect(gainNode);
         gainNode.connect(this.context.destination);
         
-        // Volume envelope
-        gainNode.gain.setValueAtTime(0.5, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+        // Volume envelope - tuned for better balance
+        gainNode.gain.setValueAtTime(AUDIO_MAX_VOLUME * 1.2, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, now + duration);
         
         // Add bass tone
         const bassOsc = this.context.createOscillator();
@@ -114,21 +121,22 @@ const audioSystem = {
         
         bassOsc.type = 'sine';
         bassOsc.frequency.setValueAtTime(80, now);
-        bassOsc.frequency.exponentialRampToValueAtTime(40, now + 0.5);
+        bassOsc.frequency.exponentialRampToValueAtTime(40, now + duration);
         
-        bassGain.gain.setValueAtTime(0.4, now);
-        bassGain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+        bassGain.gain.setValueAtTime(AUDIO_MAX_VOLUME, now);
+        bassGain.gain.exponentialRampToValueAtTime(0.01, now + duration);
         
         noise.start(now);
-        noise.stop(now + 0.5);
+        noise.stop(now + duration);
         bassOsc.start(now);
-        bassOsc.stop(now + 0.5);
+        bassOsc.stop(now + duration);
     },
     
     playImpact() {
         if (!this.enabled || !this.context) return;
         
         const now = this.context.currentTime;
+        const duration = 0.12; // Shortened for snappier feel
         
         // Create multiple oscillators for metallic clang
         const frequencies = [200, 300, 400];
@@ -143,12 +151,12 @@ const audioSystem = {
             oscillator.type = 'square';
             oscillator.frequency.setValueAtTime(freq, now);
             
-            // Quick decay for metallic sound
-            gainNode.gain.setValueAtTime(0.2, now);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+            // Quick decay for metallic sound - tuned for better balance
+            gainNode.gain.setValueAtTime(AUDIO_MAX_VOLUME * 0.8, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + duration);
             
-            oscillator.start(now + index * 0.01);
-            oscillator.stop(now + 0.15);
+            oscillator.start(now + index * 0.008);
+            oscillator.stop(now + duration);
         });
     },
     
@@ -159,7 +167,7 @@ const audioSystem = {
         
         // Descending tone sequence
         const notes = [440, 392, 349, 330, 294]; // A, G, F, E, D
-        const noteDuration = 0.4;
+        const noteDuration = 0.35; // Slightly faster
         
         notes.forEach((freq, index) => {
             const oscillator = this.context.createOscillator();
@@ -171,10 +179,10 @@ const audioSystem = {
             oscillator.type = 'sine';
             oscillator.frequency.setValueAtTime(freq, now + index * noteDuration);
             
-            // Envelope for each note
+            // Envelope for each note - tuned for better balance
             const startTime = now + index * noteDuration;
             gainNode.gain.setValueAtTime(0, startTime);
-            gainNode.gain.linearRampToValueAtTime(0.3, startTime + 0.05);
+            gainNode.gain.linearRampToValueAtTime(AUDIO_MAX_VOLUME * 1.2, startTime + 0.05);
             gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + noteDuration);
             
             oscillator.start(startTime);
@@ -222,7 +230,7 @@ function updateCamera(player) {
  * @param {number} x - World X coordinate
  * @param {number} y - World Y coordinate
  * @param {number} z - World Z coordinate (height)
- * @returns {Object|null} Screen coordinates {x, y, depth} or null if behind camera
+ * @returns {Object|null} Screen coordinates {x, y, depth} or null if behind camera or culled
  */
 function project3D(x, y, z) {
     // 1. Transform world coordinates to camera space
@@ -245,9 +253,14 @@ function project3D(x, y, z) {
     // - rotatedY is forward/backward (positive = forward/away from camera)
     // - cz is up/down (positive = up)
     
-    // 2. Handle clipping (objects behind camera)
+    // 2. Handle clipping (objects behind camera or too far)
     // If object is behind or too close to camera, don't render
     if (rotatedY <= camera.near) {
+        return null;
+    }
+    
+    // Frustum culling: don't render objects beyond far distance
+    if (rotatedY > FRUSTUM_CULL_DISTANCE) {
         return null;
     }
     
@@ -499,16 +512,22 @@ function drawGroundGrid() {
     ctx.lineWidth = 1;
     
     const gridSize = 100; // Distance between grid lines
-    const gridExtent = 1000; // How far the grid extends
+    const gridExtent = 600; // Reduced from 1000 for better performance
+    
+    // Calculate grid bounds relative to camera position for culling
+    const minX = Math.floor((camera.x - FRUSTUM_CULL_DISTANCE) / gridSize) * gridSize;
+    const maxX = Math.ceil((camera.x + FRUSTUM_CULL_DISTANCE) / gridSize) * gridSize;
+    const minY = Math.floor((camera.y - FRUSTUM_CULL_DISTANCE) / gridSize) * gridSize;
+    const maxY = Math.ceil((camera.y + FRUSTUM_CULL_DISTANCE) / gridSize) * gridSize;
     
     // Draw grid lines parallel to X axis (running along Y direction)
-    for (let x = -gridExtent; x <= gridExtent; x += gridSize) {
-        draw3DLine(x, -gridExtent, 0, x, gridExtent, 0);
+    for (let x = minX; x <= maxX; x += gridSize) {
+        draw3DLine(x, minY, 0, x, maxY, 0);
     }
     
     // Draw grid lines parallel to Y axis (running along X direction)
-    for (let y = -gridExtent; y <= gridExtent; y += gridSize) {
-        draw3DLine(-gridExtent, y, 0, gridExtent, y, 0);
+    for (let y = minY; y <= maxY; y += gridSize) {
+        draw3DLine(minX, y, 0, maxX, y, 0);
     }
 }
 
@@ -608,8 +627,14 @@ function pointInRect(px, py, rect) {
  * @param {number} count - Number of particles to create
  */
 function createDebris(x, y, count) {
+    // Enforce particle limit - remove oldest particles if needed
+    if (particles.length + count > MAX_PARTICLES) {
+        const removeCount = particles.length + count - MAX_PARTICLES;
+        particles.splice(0, removeCount);
+    }
+    
     for (let i = 0; i < count; i++) {
-        // Random angle for velocity direction
+        // Random angle for horizontal velocity direction
         const angle = Math.random() * Math.PI * 2;
         // Random magnitude between 2 and 5 pixels/frame
         const speed = 2 + Math.random() * 3;
@@ -617,8 +642,10 @@ function createDebris(x, y, count) {
         particles.push({
             x: x,
             y: y,
+            z: 5, // Start at a small height above ground
             vx: Math.cos(angle) * speed,
             vy: Math.sin(angle) * speed,
+            vz: 2 + Math.random() * 3, // Initial upward velocity (2-5 units/frame)
             angle: Math.random() * Math.PI * 2,
             angularVel: (Math.random() - 0.5) * 0.2, // Random rotation speed
             lifetime: 60 + Math.random() * 60, // 60-120 frames (1-2 seconds at 60 FPS)
@@ -637,13 +664,21 @@ function updateParticles() {
         // Update position based on velocity
         p.x += p.vx;
         p.y += p.vy;
+        p.z += p.vz;
         
-        // Apply gravity (downward acceleration)
-        p.vy += 0.15;
+        // Apply gravity (downward acceleration in Z direction)
+        p.vz -= 0.15;
         
         // Apply drag (velocity multiplier)
         p.vx *= 0.98;
         p.vy *= 0.98;
+        p.vz *= 0.98;
+        
+        // Bounce off ground (z = 0)
+        if (p.z <= 0) {
+            p.z = 0;
+            p.vz = -p.vz * 0.5; // Bounce with energy loss
+        }
         
         // Update rotation
         p.angle += p.angularVel;
@@ -651,36 +686,39 @@ function updateParticles() {
         // Decrease lifetime
         p.lifetime--;
         
-        // Remove expired particles
-        if (p.lifetime <= 0) {
+        // Remove expired particles or particles that have settled on ground with no velocity
+        if (p.lifetime <= 0 || (p.z <= 0 && Math.abs(p.vz) < 0.1 && Math.hypot(p.vx, p.vy) < 0.1)) {
             particles.splice(i, 1);
         }
     }
 }
 
 /**
- * Draw all active particles as purple line segments
+ * Draw all active particles as purple line segments using 3D projection
  */
 function drawParticles() {
-    ctx.strokeStyle = PURPLE;
     ctx.lineWidth = 2;
     
     for (let p of particles) {
+        // Distance culling: skip particles too far from camera
+        const distanceToCamera = Math.hypot(p.x - camera.x, p.y - camera.y);
+        if (distanceToCamera > PARTICLE_CULL_DISTANCE) {
+            continue;
+        }
+        
         // Calculate alpha based on remaining lifetime (fade out)
         const alpha = Math.min(1, p.lifetime / 30);
         ctx.strokeStyle = PURPLE + Math.floor(alpha * 255).toString(16).padStart(2, '0');
         
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.angle);
+        // Calculate endpoints of the line segment based on particle angle
+        const halfLength = p.length / 2;
+        const x1 = p.x + Math.cos(p.angle) * halfLength;
+        const y1 = p.y + Math.sin(p.angle) * halfLength;
+        const x2 = p.x - Math.cos(p.angle) * halfLength;
+        const y2 = p.y - Math.sin(p.angle) * halfLength;
         
-        // Draw line segment
-        ctx.beginPath();
-        ctx.moveTo(-p.length / 2, 0);
-        ctx.lineTo(p.length / 2, 0);
-        ctx.stroke();
-        
-        ctx.restore();
+        // Draw particle as a 3D line segment at its current z position
+        draw3DLine(x1, y1, p.z, x2, y2, p.z);
     }
 }
 
@@ -910,7 +948,7 @@ function updateEnemy() {
     } else if (enemy.state === 'hunting') {
         // Lost sight - transition to SEARCHING
         enemy.state = 'searching';
-        enemy.searchTimeout = 300; // Search for 5 seconds
+        enemy.searchTimeout = 240; // Search for 4 seconds (reduced from 5 for better pacing)
     }
     
     // Determine target position based on state
@@ -927,8 +965,8 @@ function updateEnemy() {
         
         // Check if reached last known position
         const distToLastKnown = Math.hypot(enemy.x - targetX, enemy.y - targetY);
-        if (distToLastKnown < TANK_SIZE * 2) {
-            // Reached last known position without finding player
+        if (distToLastKnown < TANK_SIZE * 2.5) {
+            // Reached last known position without finding player (slightly larger radius)
             lastKnownPlayerPos = null;
             enemy.state = 'idle';
         }
@@ -1138,11 +1176,17 @@ function draw3DGame() {
     // 2. Collect all entities with their distances from camera for depth sorting
     const entities = [];
     
-    // Add obstacles
+    // Add obstacles (with frustum culling)
     for (let obs of obstacles) {
         const centerX = obs.x + obs.width / 2;
         const centerY = obs.y + obs.height / 2;
         const distance = Math.hypot(centerX - camera.x, centerY - camera.y);
+        
+        // Frustum culling: skip objects too far away
+        if (distance > FRUSTUM_CULL_DISTANCE) {
+            continue;
+        }
+        
         entities.push({
             type: 'obstacle',
             data: obs,
@@ -1150,44 +1194,46 @@ function draw3DGame() {
         });
     }
     
-    // Add enemy tank
+    // Add enemy tank (with frustum culling)
     if (enemy) {
         const distance = Math.hypot(enemy.x - camera.x, enemy.y - camera.y);
-        entities.push({
-            type: 'enemy',
-            data: enemy,
-            distance: distance
-        });
+        
+        // Frustum culling: skip if too far away
+        if (distance <= FRUSTUM_CULL_DISTANCE) {
+            entities.push({
+                type: 'enemy',
+                data: enemy,
+                distance: distance
+            });
+        }
     }
     
-    // Add player shell
+    // Add player shell (with frustum culling)
     if (playerShell) {
         const distance = Math.hypot(playerShell.x - camera.x, playerShell.y - camera.y);
-        entities.push({
-            type: 'shell',
-            data: playerShell,
-            distance: distance
-        });
+        
+        // Frustum culling: skip if too far away
+        if (distance <= FRUSTUM_CULL_DISTANCE) {
+            entities.push({
+                type: 'shell',
+                data: playerShell,
+                distance: distance
+            });
+        }
     }
     
-    // Add enemy shell
+    // Add enemy shell (with frustum culling)
     if (enemyShell) {
         const distance = Math.hypot(enemyShell.x - camera.x, enemyShell.y - camera.y);
-        entities.push({
-            type: 'shell',
-            data: enemyShell,
-            distance: distance
-        });
-    }
-    
-    // Add particles
-    for (let particle of particles) {
-        const distance = Math.hypot(particle.x - camera.x, particle.y - camera.y);
-        entities.push({
-            type: 'particle',
-            data: particle,
-            distance: distance
-        });
+        
+        // Frustum culling: skip if too far away
+        if (distance <= FRUSTUM_CULL_DISTANCE) {
+            entities.push({
+                type: 'shell',
+                data: enemyShell,
+                distance: distance
+            });
+        }
     }
     
     // 3. Sort entities by distance (far to near) for proper rendering order
@@ -1205,13 +1251,13 @@ function draw3DGame() {
             case 'shell':
                 draw3DShell(entity.data);
                 break;
-            case 'particle':
-                draw3DParticle(entity.data);
-                break;
         }
     }
     
-    // 5. Draw HUD elements (score) in 2D overlay
+    // 5. Draw particles (rendered separately with proper depth)
+    drawParticles();
+    
+    // 6. Draw HUD elements (score) in 2D overlay
     ctx.fillStyle = PURPLE;
     ctx.font = '24px Courier New';
     ctx.textAlign = 'left';
@@ -1244,28 +1290,7 @@ function draw3DShell(shell) {
     draw3DBox(shell.x, shell.y, height, size, size, size);
 }
 
-/**
- * Draw a particle in 3D space
- * @param {Object} particle - Particle with x, y, angle, length, lifetime properties
- */
-function draw3DParticle(particle) {
-    // Calculate alpha based on remaining lifetime (fade out)
-    const alpha = Math.min(1, particle.lifetime / 30);
-    ctx.strokeStyle = PURPLE + Math.floor(alpha * 255).toString(16).padStart(2, '0');
-    ctx.lineWidth = 2;
-    
-    // Draw particle as a 3D line segment at ground level
-    const z = 5; // Height above ground
-    
-    // Calculate endpoints of the line segment based on particle angle
-    const halfLength = particle.length / 2;
-    const x1 = particle.x + Math.cos(particle.angle) * halfLength;
-    const y1 = particle.y + Math.sin(particle.angle) * halfLength;
-    const x2 = particle.x - Math.cos(particle.angle) * halfLength;
-    const y2 = particle.y - Math.sin(particle.angle) * halfLength;
-    
-    draw3DLine(x1, y1, z, x2, y2, z);
-}
+
 
 function drawTank(x, y, angle, isPlayer) {
     ctx.save();
