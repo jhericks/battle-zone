@@ -165,6 +165,31 @@
   - Render particles in 3D space
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
 
+- [x] 14.1 Implement opaque rendering with back-face culling
+  - Implement face normal calculation using cross product
+  - Add back-face culling using dot product of face normal and view direction
+  - Create global face collection and sorting system (all faces from all objects)
+  - Sort faces by distance from camera (farthest to nearest)
+  - Fill each face with black color before drawing purple wireframe edges
+  - Ensure objects are opaque and you cannot see through them
+  - _Requirements: 3.9, 3.10, 3.11, 3.12, 3.13, 3.14, 3.15_
+
+- [x] 14.2 Redesign enemy tank 3D model
+  - Create trapezoidal prism body (25 wide, 35 deep at bottom, 28 deep at top, 12 tall)
+  - Add cube turret (14x12x10) positioned on top of body
+  - Add rectangular barrel (25 long, 3x3 cross-section) extending from turret
+  - Fix Z-axis orientation by negating Y coordinate in projection
+  - Apply back-face culling to tank model
+  - Ensure tank renders right-side up with treads on ground
+  - _Requirements: 3.5, 3.7, 3.9, 3.10, 3.11_
+
+- [ ] 14.3 Re-enable enemy AI and player vulnerability
+  - Remove early return in updateEnemy() to restore enemy movement
+  - Uncomment game over logic when enemy shell hits player
+  - Test that enemy tank moves and fires correctly
+  - Test that player dies when hit by enemy shell
+  - _Note: These were temporarily disabled for tank model debugging_
+
 - [x] 15. Update particle system for 3D
   - Add z coordinate to particle objects
   - Add vz (vertical velocity) to particles

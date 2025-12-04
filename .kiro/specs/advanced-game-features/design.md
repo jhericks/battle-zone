@@ -164,23 +164,36 @@ const audioSystem = {
    
 2. Apply perspective projection:
    - screenX = (x / z) * focalLength + canvas.width / 2
-   - screenY = (y / z) * focalLength + canvas.height / 2
+   - screenY = (-y / z) * focalLength + canvas.height / 2  // Note: negated Y for correct orientation
    - focalLength = canvas.width / (2 * tan(fov / 2))
+   
+3. Z-axis correction:
+   - The Y coordinate is negated during projection to ensure correct vertical orientation
+   - Without negation, 3D models render upside down
+   - This correction ensures objects with positive Z values appear above the ground plane
 ```
 
 **3D Models**:
-- **Tank**: Simple box body (20x15x10) + turret box (12x10x8) + barrel cylinder
-- **Obstacle**: Rectangular prism matching 2D dimensions with height
+- **Tank**: Composite model with trapezoidal prism body (25 units wide, 35 units deep at bottom for treads, 28 units deep at top, 12 units tall) + cube turret (14x12x10) positioned on top + rectangular barrel (25 units long, 3x3 cross-section) extending from turret
+- **Obstacle**: Rectangular prism matching 2D dimensions with height, rendered with opaque faces
 - **Shell**: Small cube or sphere wireframe
 - **Ground**: Grid of lines extending to horizon
 
-**Rendering Order**:
+**Rendering Pipeline**:
 1. Draw ground grid
-2. Sort entities by distance from camera (far to near)
-3. Draw obstacles
-4. Draw enemy tanks
-5. Draw shells
+2. Collect all visible faces from all entities (obstacles, tanks, shells)
+3. Apply back-face culling: calculate face normal using cross product, compute dot product with view direction, cull faces with dotProduct ≤ 0
+4. Sort remaining faces by distance from camera (farthest to nearest)
+5. For each face in sorted order:
+   - Fill face with black color (creates opaque appearance)
+   - Draw purple wireframe edges on top
 6. Draw particles (if visible in 3D space)
+
+**Back-Face Culling Algorithm**:
+- Calculate face normal: `normal = cross(edge1, edge2)`
+- Calculate view direction: `viewDir = normalize(faceCenter - cameraPos)`
+- Compute visibility: `dotProduct = dot(normal, viewDir)`
+- Cull if `dotProduct ≤ 0` (face pointing away from camera)
 
 ### 4. AI System Enhancement
 
@@ -896,9 +909,11 @@ fc.assert(
 
 **3D Rendering**:
 - Limit number of line segments drawn per frame
-- Use simple wireframe rendering (no filled polygons)
+- Use opaque rendering with black-filled faces and purple wireframe edges
+- Apply back-face culling to reduce face count by ~50%
 - Cull objects outside view frustum
-- Sort entities by depth only when necessary
+- Sort all faces globally by depth every frame for correct occlusion
+- Face sorting is O(n log n) but necessary for proper depth ordering
 
 **Particle System**:
 - Use object pooling to avoid garbage collection

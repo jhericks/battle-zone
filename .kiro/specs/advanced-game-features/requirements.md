@@ -19,6 +19,10 @@ This document specifies enhancements to the existing BattleZone-style tank game 
 - **First-Person View**: 3D camera perspective positioned at the player tank's location looking in its facing direction
 - **3D Polygon**: Simple geometric shape rendered in three-dimensional space using vertices and faces
 - **3D Renderer**: Component that projects 3D coordinates onto the 2D canvas using perspective projection
+- **Back-Face Culling**: Rendering optimization that hides polygon faces oriented away from the camera
+- **Face Normal**: Vector perpendicular to a polygon face used to determine its orientation
+- **Depth Sorting**: Technique of rendering faces from farthest to nearest to achieve proper occlusion
+- **Trapezoidal Prism**: 3D shape with trapezoidal cross-section used for tank body and treads
 - **Aim Error**: Angular offset applied to enemy firing direction to reduce accuracy
 - **Difficulty Level**: Game challenge determined by the player's current score
 - **Playfield**: The bounded rectangular area within which gameplay occurs
@@ -55,18 +59,25 @@ This document specifies enhancements to the existing BattleZone-style tank game 
 
 ### Requirement 3
 
-**User Story:** As a player, I want to experience the game from a first-person perspective with simple 3D polygon graphics, so that I feel more immersed in the tank combat experience.
+**User Story:** As a player, I want to experience the game from a first-person perspective with opaque 3D polygon graphics, so that I feel more immersed in the tank combat experience with realistic solid objects.
 
 #### Acceptance Criteria
 
 1. WHEN the game is in playing state THEN the Camera System SHALL position the 3D viewport at the Player Tank's coordinates with an elevated eye height
 2. WHEN the game is in playing state THEN the Camera System SHALL orient the 3D viewport to align with the Player Tank's facing angle
 3. WHEN rendering game entities THEN the 3D Renderer SHALL define each entity as a collection of 3D vertices forming simple polygon shapes
-4. WHEN rendering obstacles THEN the 3D Renderer SHALL draw them as 3D rectangular prisms using purple wireframe edges
-5. WHEN rendering the Enemy Tank THEN the 3D Renderer SHALL draw it as a simple 3D polygon tank shape using purple wireframe edges
+4. WHEN rendering obstacles THEN the 3D Renderer SHALL draw them as 3D rectangular prisms using purple wireframe edges with opaque black-filled faces
+5. WHEN rendering the Enemy Tank THEN the 3D Renderer SHALL draw it as a composite 3D model consisting of a trapezoidal prism body (25 units wide, 35 units deep at bottom for treads, 28 units deep at top, 12 units tall), a cube turret (14x12x10 units) positioned on top of the body, and a rectangular barrel (25 units long, 3x3 cross-section) extending from the turret
 6. WHEN rendering shells THEN the 3D Renderer SHALL draw them as 3D objects with perspective projection
-7. WHEN projecting 3D coordinates THEN the 3D Renderer SHALL apply perspective transformation to convert 3D world coordinates to 2D screen coordinates
+7. WHEN projecting 3D coordinates THEN the 3D Renderer SHALL apply perspective transformation to convert 3D world coordinates to 2D screen coordinates with negated Z-axis to ensure correct vertical orientation
 8. WHEN rendering the ground plane THEN the 3D Renderer SHALL draw a grid or horizon line to provide spatial reference
+9. WHEN rendering any 3D polygon face THEN the 3D Renderer SHALL calculate the face normal vector using the cross product of two edge vectors
+10. WHEN determining face visibility THEN the 3D Renderer SHALL compute the dot product between the face normal and the view direction vector from the face center to the camera
+11. WHEN the dot product is less than or equal to zero THEN the 3D Renderer SHALL cull (not render) the back-facing polygon face
+12. WHEN rendering multiple 3D objects THEN the 3D Renderer SHALL collect all visible faces from all entities into a single array
+13. WHEN rendering collected faces THEN the 3D Renderer SHALL sort faces by distance from camera (farthest to nearest) to achieve proper depth ordering
+14. WHEN drawing each face THEN the 3D Renderer SHALL first fill the face with black color, then draw purple wireframe edges on top to create opaque solid appearance
+15. WHEN objects overlap in the view THEN the 3D Renderer SHALL ensure that nearer faces completely occlude farther faces preventing see-through rendering
 
 ### Requirement 4
 
