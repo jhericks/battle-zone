@@ -14,11 +14,49 @@ const ENEMY_BASE_ROTATION_SPEED = 0.0028;
 const ENEMY_FIRE_COOLDOWN = 120; // frames
 const ENEMY_SPEED_INCREASE = 1.1; // 10% increase per kill
 
+// Tank acceleration constants (tuned for better feel)
+const TANK_MAX_SPEED = 3.0;           // pixels per frame
+const TANK_ACCELERATION = 0.18;       // pixels per frame² (slightly faster for responsiveness)
+const TANK_DECELERATION = 0.22;       // pixels per frame² (slightly faster stop for better control)
+
+// Difficulty balancing constants (tuned for better gameplay feel)
+const MIN_AIM_ERROR = 15 * (Math.PI / 180); // 15 degrees minimum for first shot
+const MAX_AIM_ERROR = 20 * (Math.PI / 180); // 20 degrees maximum at score 0 (reduced for better challenge)
+const AIM_IMPROVEMENT_RATE = 0.12; // How quickly aim improves with score (slower progression)
+const ENEMY_SHELL_SPEED_MULTIPLIER = 0.6; // Enemy shells are 60% of player speed
+
+/**
+ * Calculate aim error offset based on current score
+ * @param {number} score - Current player score
+ * @param {boolean} isFirstShot - True if this is the enemy's first shot ever
+ * @returns {number} Aim error offset in radians
+ */
+function calculateAimError(score, isFirstShot) {
+    // First shot always misses significantly
+    if (isFirstShot) {
+        return (Math.random() - 0.5) * 2 * MIN_AIM_ERROR;
+    }
+    
+    // Progressive improvement: starts at MAX_AIM_ERROR, approaches but never reaches 0
+    const baseError = MAX_AIM_ERROR / (1 + score * AIM_IMPROVEMENT_RATE);
+    const minError = 3 * (Math.PI / 180); // Always at least 3 degrees of error
+    const actualError = Math.max(baseError, minError);
+    
+    // Random offset within error range
+    return (Math.random() - 0.5) * 2 * actualError;
+}
+
+// Playfield constants
+const PLAYFIELD_WIDTH = 2000;
+const PLAYFIELD_HEIGHT = 2000;
+
 // Optimization constants
-const MAX_PARTICLES = 100; // Maximum active particles
-const PARTICLE_CULL_DISTANCE = 800; // Don't render particles beyond this distance
-const FRUSTUM_CULL_DISTANCE = 1200; // Don't render objects beyond this distance
-const AUDIO_MAX_VOLUME = 0.25; // Reduced from 0.3-0.5 for better balance
+// These values are tuned for optimal performance and visual quality balance
+const MAX_PARTICLES = 80; // Maximum active particles (reduced for better performance)
+const PARTICLE_CULL_DISTANCE = 700; // Don't render particles beyond this distance
+const FRUSTUM_CULL_DISTANCE = 1000; // Don't render objects beyond this distance (optimized)
+const AUDIO_MAX_VOLUME = 0.22; // Tuned for better audio balance
+const GRID_RENDER_DISTANCE = 500; // Reduced grid rendering distance for performance
 
 // Audio System
 const audioSystem = {
@@ -36,11 +74,49 @@ const audioSystem = {
             
             this.context = new AudioContext();
             this.enabled = true;
+            
+            // Initialize engine sound
+            this.initEngineSound();
+            
             return true;
         } catch (e) {
             console.warn('Failed to initialize audio:', e);
             return false;
         }
+    },
+    
+    initEngineSound() {
+        if (!this.context) return;
+        
+        // Create oscillator and gain nodes for continuous engine sound
+        const oscillator = this.context.createOscillator();
+        const gainNode = this.context.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(this.context.destination);
+        
+        // Use sawtooth wave for engine-like sound
+        oscillator.type = 'sawtooth';
+        
+        // Start at idle frequency
+        oscillator.frequency.setValueAtTime(50, this.context.currentTime);
+        
+        // Start at zero volume (will ramp up when game starts)
+        gainNode.gain.setValueAtTime(0, this.context.currentTime);
+        
+        // Start the oscillator (it runs continuously)
+        oscillator.start();
+        
+        // Store references
+        this.engineSound = {
+            oscillator: oscillator,
+            gainNode: gainNode,
+            isPlaying: false,
+            currentFrequency: 50,
+            targetFrequency: 50,
+            currentGain: 0,
+            targetGain: 0
+        };
     },
     
     // Resume audio context (required for user gesture in some browsers)
@@ -54,6 +130,7 @@ const audioSystem = {
         if (!this.enabled || !this.context) return;
         
         const now = this.context.currentTime;
+        const duration = 0.07; // Slightly shorter for snappier feel
         
         // Create oscillator for laser-like sound
         const oscillator = this.context.createOscillator();
@@ -67,14 +144,14 @@ const audioSystem = {
         
         // Frequency sweep from 800Hz to 400Hz
         oscillator.frequency.setValueAtTime(800, now);
-        oscillator.frequency.exponentialRampToValueAtTime(400, now + 0.08);
+        oscillator.frequency.exponentialRampToValueAtTime(400, now + duration);
         
         // Volume envelope - tuned for better balance
         gainNode.gain.setValueAtTime(AUDIO_MAX_VOLUME, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, now + duration);
         
         oscillator.start(now);
-        oscillator.stop(now + 0.08);
+        oscillator.stop(now + duration);
     },
     
     playExplosion() {
@@ -136,7 +213,7 @@ const audioSystem = {
         if (!this.enabled || !this.context) return;
         
         const now = this.context.currentTime;
-        const duration = 0.12; // Shortened for snappier feel
+        const duration = 0.10; // Shorter for snappier feel
         
         // Create multiple oscillators for metallic clang
         const frequencies = [200, 300, 400];
@@ -152,10 +229,10 @@ const audioSystem = {
             oscillator.frequency.setValueAtTime(freq, now);
             
             // Quick decay for metallic sound - tuned for better balance
-            gainNode.gain.setValueAtTime(AUDIO_MAX_VOLUME * 0.8, now);
+            gainNode.gain.setValueAtTime(AUDIO_MAX_VOLUME * 0.7, now);
             gainNode.gain.exponentialRampToValueAtTime(0.01, now + duration);
             
-            oscillator.start(now + index * 0.008);
+            oscillator.start(now + index * 0.007);
             oscillator.stop(now + duration);
         });
     },
@@ -188,6 +265,71 @@ const audioSystem = {
             oscillator.start(startTime);
             oscillator.stop(startTime + noteDuration);
         });
+    },
+    
+    /**
+     * Update engine sound based on player movement
+     * @param {boolean} isMoving - True if player is moving, false if stationary
+     */
+    updateEngineSound(isMoving) {
+        if (!this.enabled || !this.context || !this.engineSound) return;
+        
+        const now = this.context.currentTime;
+        const engine = this.engineSound;
+        
+        // Define frequency and gain ranges
+        const IDLE_FREQUENCY = 50;      // 40-60Hz range, using middle value
+        const ACCEL_FREQUENCY = 100;    // 80-120Hz range, using middle value
+        const IDLE_GAIN = 0.08;         // Low volume for idle
+        const ACCEL_GAIN = 0.15;        // Higher volume for acceleration
+        const TRANSITION_TIME = 0.3;    // Smooth transition over 0.3 seconds
+        
+        // Determine target values based on movement state
+        if (isMoving) {
+            engine.targetFrequency = ACCEL_FREQUENCY;
+            engine.targetGain = ACCEL_GAIN;
+            engine.isPlaying = true;
+        } else {
+            engine.targetFrequency = IDLE_FREQUENCY;
+            engine.targetGain = IDLE_GAIN;
+            engine.isPlaying = true;
+        }
+        
+        // Apply smooth transitions using linear ramps
+        // Cancel any scheduled changes first
+        engine.oscillator.frequency.cancelScheduledValues(now);
+        engine.gainNode.gain.cancelScheduledValues(now);
+        
+        // Set current values
+        engine.oscillator.frequency.setValueAtTime(engine.currentFrequency, now);
+        engine.gainNode.gain.setValueAtTime(engine.currentGain, now);
+        
+        // Ramp to target values
+        engine.oscillator.frequency.linearRampToValueAtTime(engine.targetFrequency, now + TRANSITION_TIME);
+        engine.gainNode.gain.linearRampToValueAtTime(engine.targetGain, now + TRANSITION_TIME);
+        
+        // Update current values for next call
+        engine.currentFrequency = engine.targetFrequency;
+        engine.currentGain = engine.targetGain;
+    },
+    
+    /**
+     * Stop engine sound (for game over or pause)
+     */
+    stopEngineSound() {
+        if (!this.enabled || !this.context || !this.engineSound) return;
+        
+        const now = this.context.currentTime;
+        const engine = this.engineSound;
+        
+        // Fade out smoothly
+        engine.gainNode.gain.cancelScheduledValues(now);
+        engine.gainNode.gain.setValueAtTime(engine.currentGain, now);
+        engine.gainNode.gain.linearRampToValueAtTime(0, now + 0.2);
+        
+        engine.currentGain = 0;
+        engine.targetGain = 0;
+        engine.isPlaying = false;
     }
 };
 
@@ -201,7 +343,7 @@ const camera = {
     z: 20,          // Eye height (elevated above ground)
     yaw: 0,         // Horizontal rotation (synced with player angle)
     pitch: 0,       // Vertical rotation (fixed at 0 for now)
-    fov: Math.PI / 3,  // Field of view in radians (60 degrees)
+    fov: Math.PI / 2,  // Field of view in radians (90 degrees)
     near: 0.1,      // Near clipping plane
     far: 1000       // Far clipping plane
 };
@@ -241,9 +383,11 @@ function project3D(x, y, z) {
     let cz = z - camera.z;
     
     // Rotate by camera yaw (horizontal rotation)
-    // Standard 2D rotation matrix around Z axis
-    const cosYaw = Math.cos(-camera.yaw);
-    const sinYaw = Math.sin(-camera.yaw);
+    // Adjust camera angle to align with player's coordinate system
+    // Player at 270° should be looking "forward" in camera space
+    const adjustedYaw = -(camera.yaw - Math.PI / 2);
+    const cosYaw = Math.cos(adjustedYaw);
+    const sinYaw = Math.sin(adjustedYaw);
     
     const rotatedX = cx * cosYaw - cy * sinYaw;
     const rotatedY = cx * sinYaw + cy * cosYaw;
@@ -286,7 +430,7 @@ function project3D(x, y, z) {
 // 3D Wireframe Rendering
 
 /**
- * Draw a 3D line from (x1, y1, z1) to (x2, y2, z2)
+ * Draw a 3D line from (x1, y1, z1) to (x2, y2, z2) with screen-space culling
  * @param {number} x1 - Start X coordinate in world space
  * @param {number} y1 - Start Y coordinate in world space
  * @param {number} z1 - Start Z coordinate in world space
@@ -300,8 +444,17 @@ function draw3DLine(x1, y1, z1, x2, y2, z2) {
     const p1 = project3D(x1, y1, z1);
     const p2 = project3D(x2, y2, z2);
     
-    // Skip if either point is behind camera
+    // Skip if either point is behind camera or culled
     if (!p1 || !p2) {
+        return false;
+    }
+    
+    // Screen-space culling: skip lines completely off-screen
+    const margin = 50; // Small margin to avoid clipping visible lines
+    if ((p1.x < -margin && p2.x < -margin) || 
+        (p1.x > canvas.width + margin && p2.x > canvas.width + margin) ||
+        (p1.y < -margin && p2.y < -margin) || 
+        (p1.y > canvas.height + margin && p2.y > canvas.height + margin)) {
         return false;
     }
     
@@ -505,28 +658,29 @@ function draw3DTank(x, y, z, angle) {
 }
 
 /**
- * Draw a ground grid for spatial reference
+ * Draw a ground grid for spatial reference (optimized)
  */
 function drawGroundGrid() {
-    ctx.strokeStyle = PURPLE + '40'; // Purple with low opacity
+    ctx.strokeStyle = PURPLE + '30'; // Purple with lower opacity for subtlety
     ctx.lineWidth = 1;
     
     const gridSize = 100; // Distance between grid lines
-    const gridExtent = 600; // Reduced from 1000 for better performance
     
-    // Calculate grid bounds relative to camera position for culling
-    const minX = Math.floor((camera.x - FRUSTUM_CULL_DISTANCE) / gridSize) * gridSize;
-    const maxX = Math.ceil((camera.x + FRUSTUM_CULL_DISTANCE) / gridSize) * gridSize;
-    const minY = Math.floor((camera.y - FRUSTUM_CULL_DISTANCE) / gridSize) * gridSize;
-    const maxY = Math.ceil((camera.y + FRUSTUM_CULL_DISTANCE) / gridSize) * gridSize;
+    // Use optimized grid render distance instead of full frustum distance
+    const minX = Math.floor((camera.x - GRID_RENDER_DISTANCE) / gridSize) * gridSize;
+    const maxX = Math.ceil((camera.x + GRID_RENDER_DISTANCE) / gridSize) * gridSize;
+    const minY = Math.floor((camera.y - GRID_RENDER_DISTANCE) / gridSize) * gridSize;
+    const maxY = Math.ceil((camera.y + GRID_RENDER_DISTANCE) / gridSize) * gridSize;
     
     // Draw grid lines parallel to X axis (running along Y direction)
-    for (let x = minX; x <= maxX; x += gridSize) {
+    // Skip every other line for better performance
+    for (let x = minX; x <= maxX; x += gridSize * 2) {
         draw3DLine(x, minY, 0, x, maxY, 0);
     }
     
     // Draw grid lines parallel to Y axis (running along X direction)
-    for (let y = minY; y <= maxY; y += gridSize) {
+    // Skip every other line for better performance
+    for (let y = minY; y <= maxY; y += gridSize * 2) {
         draw3DLine(minX, y, 0, maxX, y, 0);
     }
 }
@@ -621,6 +775,26 @@ function pointInRect(px, py, rect) {
 }
 
 /**
+ * Apply boundary constraints to keep entity within playfield
+ * @param {Object} entity - Entity with x, y properties
+ */
+function applyBoundaryConstraints(entity) {
+    // Constrain X coordinate
+    if (entity.x < TANK_SIZE) {
+        entity.x = TANK_SIZE;
+    } else if (entity.x > PLAYFIELD_WIDTH - TANK_SIZE) {
+        entity.x = PLAYFIELD_WIDTH - TANK_SIZE;
+    }
+    
+    // Constrain Y coordinate
+    if (entity.y < TANK_SIZE) {
+        entity.y = TANK_SIZE;
+    } else if (entity.y > PLAYFIELD_HEIGHT - TANK_SIZE) {
+        entity.y = PLAYFIELD_HEIGHT - TANK_SIZE;
+    }
+}
+
+/**
  * Create debris particles at a destruction point
  * @param {number} x - X coordinate of destruction
  * @param {number} y - Y coordinate of destruction
@@ -655,7 +829,7 @@ function createDebris(x, y, count) {
 }
 
 /**
- * Update all active particles with physics
+ * Update all active particles with physics (optimized)
  */
 function updateParticles() {
     for (let i = particles.length - 1; i >= 0; i--) {
@@ -674,10 +848,14 @@ function updateParticles() {
         p.vy *= 0.98;
         p.vz *= 0.98;
         
-        // Bounce off ground (z = 0)
+        // Bounce off ground (z = 0) with energy loss
         if (p.z <= 0) {
             p.z = 0;
-            p.vz = -p.vz * 0.5; // Bounce with energy loss
+            p.vz = -p.vz * 0.4; // More energy loss for faster settling
+            
+            // Increase drag on ground for faster settling
+            p.vx *= 0.9;
+            p.vy *= 0.9;
         }
         
         // Update rotation
@@ -686,8 +864,10 @@ function updateParticles() {
         // Decrease lifetime
         p.lifetime--;
         
-        // Remove expired particles or particles that have settled on ground with no velocity
-        if (p.lifetime <= 0 || (p.z <= 0 && Math.abs(p.vz) < 0.1 && Math.hypot(p.vx, p.vy) < 0.1)) {
+        // Remove expired particles or particles that have settled on ground with minimal velocity
+        // More aggressive removal for better performance
+        if (p.lifetime <= 0 || 
+            (p.z <= 0 && Math.abs(p.vz) < 0.05 && Math.hypot(p.vx, p.vy) < 0.05)) {
             particles.splice(i, 1);
         }
     }
@@ -734,10 +914,8 @@ let player = {
     x: canvas.width / 2,
     y: canvas.height - 100,
     angle: -Math.PI / 2, // facing up
-    leftTreadForward: false,
-    leftTreadBackward: false,
-    rightTreadForward: false,
-    rightTreadBackward: false
+    velocity: 0,                       // Current speed (-TANK_MAX_SPEED to +TANK_MAX_SPEED)
+    targetVelocity: 0                  // Desired speed based on input
 };
 
 // Enemy tank
@@ -755,34 +933,128 @@ let enemyShell = null;
 // Obstacles
 let obstacles = [];
 
+// Boundary walls
+let boundaries = [];
+
 // Keys pressed
 let keys = {};
+
+/**
+ * Initialize obstacles with spatial distribution across the playfield
+ * Scales obstacle count based on playfield area and ensures proper spacing
+ */
+function initializeObstacles() {
+    obstacles = [];
+    
+    // Calculate obstacle count based on area ratio
+    // Original playfield: ~800x600 = 480,000 units² with 4 obstacles
+    // New playfield: 2000x2000 = 4,000,000 units²
+    // Area ratio: 4,000,000 / 480,000 ≈ 8.33
+    // Scaled count: 4 * 8.33 ≈ 33, but we'll use 20-25 for better gameplay
+    const OBSTACLE_COUNT = 22;
+    
+    // Minimum distance from player/enemy start positions
+    const MIN_DISTANCE_FROM_PLAYER = 300;
+    const MIN_DISTANCE_FROM_ENEMY = 300;
+    
+    // Minimum distance between obstacles
+    const MIN_OBSTACLE_SPACING = 150;
+    
+    // Player and enemy start positions
+    const playerStartX = PLAYFIELD_WIDTH / 2;
+    const playerStartY = PLAYFIELD_HEIGHT - 200;
+    const enemyStartX = PLAYFIELD_WIDTH / 2;
+    const enemyStartY = 200;
+    
+    // Generate obstacles with spatial distribution
+    let attempts = 0;
+    const MAX_ATTEMPTS = OBSTACLE_COUNT * 50; // Prevent infinite loops
+    
+    while (obstacles.length < OBSTACLE_COUNT && attempts < MAX_ATTEMPTS) {
+        attempts++;
+        
+        // Generate random position with some margin from edges
+        const margin = OBSTACLE_SIZE * 2;
+        const x = margin + Math.random() * (PLAYFIELD_WIDTH - margin * 2);
+        const y = margin + Math.random() * (PLAYFIELD_HEIGHT - margin * 2);
+        
+        // Check distance from player start position
+        const distToPlayer = Math.hypot(x - playerStartX, y - playerStartY);
+        if (distToPlayer < MIN_DISTANCE_FROM_PLAYER) {
+            continue;
+        }
+        
+        // Check distance from enemy start position
+        const distToEnemy = Math.hypot(x - enemyStartX, y - enemyStartY);
+        if (distToEnemy < MIN_DISTANCE_FROM_ENEMY) {
+            continue;
+        }
+        
+        // Check distance from existing obstacles
+        let tooClose = false;
+        for (let obs of obstacles) {
+            const obsCenterX = obs.x + obs.width / 2;
+            const obsCenterY = obs.y + obs.height / 2;
+            const dist = Math.hypot(x - obsCenterX, y - obsCenterY);
+            
+            if (dist < MIN_OBSTACLE_SPACING) {
+                tooClose = true;
+                break;
+            }
+        }
+        
+        if (tooClose) {
+            continue;
+        }
+        
+        // Valid position found - add obstacle
+        obstacles.push({
+            x: x - OBSTACLE_SIZE / 2, // Center the obstacle on the generated position
+            y: y - OBSTACLE_SIZE / 2,
+            width: OBSTACLE_SIZE,
+            height: OBSTACLE_SIZE
+        });
+    }
+    
+    // If we couldn't generate enough obstacles, log a warning
+    if (obstacles.length < OBSTACLE_COUNT) {
+        console.warn(`Only generated ${obstacles.length} obstacles out of ${OBSTACLE_COUNT} requested`);
+    }
+}
 
 // Initialize game
 function init() {
     score = 0;
     enemySpeedMultiplier = 1;
+    
+    // Initialize player at center-bottom of playfield
     player = {
-        x: canvas.width / 2,
-        y: canvas.height - 100,
+        x: PLAYFIELD_WIDTH / 2,
+        y: PLAYFIELD_HEIGHT - 200,
         angle: -Math.PI / 2,
-        leftTreadForward: false,
-        leftTreadBackward: false,
-        rightTreadForward: false,
-        rightTreadBackward: false
+        velocity: 0,                       // Current speed (-TANK_MAX_SPEED to +TANK_MAX_SPEED)
+        targetVelocity: 0                  // Desired speed based on input
     };
     
     playerShell = null;
     enemyShell = null;
     particles = [];
     
-    // Create obstacles
-    obstacles = [
-        { x: 200, y: 200, width: OBSTACLE_SIZE, height: OBSTACLE_SIZE },
-        { x: 600, y: 200, width: OBSTACLE_SIZE, height: OBSTACLE_SIZE },
-        { x: 400, y: 350, width: OBSTACLE_SIZE, height: OBSTACLE_SIZE },
-        { x: 150, y: 450, width: OBSTACLE_SIZE, height: OBSTACLE_SIZE }
+    // Create boundary walls at playfield edges
+    const wallThickness = 10;
+    boundaries = [
+        // Top wall
+        { x: 0, y: 0, width: PLAYFIELD_WIDTH, height: wallThickness },
+        // Bottom wall
+        { x: 0, y: PLAYFIELD_HEIGHT - wallThickness, width: PLAYFIELD_WIDTH, height: wallThickness },
+        // Left wall
+        { x: 0, y: 0, width: wallThickness, height: PLAYFIELD_HEIGHT },
+        // Right wall
+        { x: PLAYFIELD_WIDTH - wallThickness, y: 0, width: wallThickness, height: PLAYFIELD_HEIGHT }
     ];
+    
+    // Create obstacles using spatial distribution
+    initializeObstacles();
     
     // Create enemy tank
     spawnEnemy();
@@ -790,12 +1062,13 @@ function init() {
 
 function spawnEnemy() {
     enemy = {
-        x: canvas.width / 2,
-        y: 100,
+        x: PLAYFIELD_WIDTH / 2,
+        y: 200,
         angle: Math.PI / 2, // facing down
         fireCooldown: ENEMY_FIRE_COOLDOWN,
         state: 'idle', // 'idle', 'hunting', 'searching'
-        searchTimeout: 0 // Frames to search before giving up
+        searchTimeout: 0, // Frames to search before giving up
+        hasFiredOnce: false // Track if enemy has fired at least once
     };
 }
 
@@ -843,13 +1116,11 @@ canvas.addEventListener('click', () => {
 
 // Update game logic
 function update() {
-    if (gameState !== 'playing') return;
-    
-    // Update player controls
-    player.leftTreadForward = keys['q'];
-    player.leftTreadBackward = keys['a'];
-    player.rightTreadForward = keys['w'];
-    player.rightTreadBackward = keys['s'];
+    if (gameState !== 'playing') {
+        // Stop engine sound when not playing
+        audioSystem.stopEngineSound();
+        return;
+    }
     
     // Fire player shell
     if (keys[' '] && !playerShell) {
@@ -871,8 +1142,14 @@ function update() {
         }
     }
     
+    // Determine if player is moving (W or S key pressed)
+    const isPlayerMoving = keys['w'] || keys['s'];
+    
     // Update player tank movement
     updatePlayerMovement();
+    
+    // Update engine sound based on player movement
+    audioSystem.updateEngineSound(isPlayerMoving);
     
     // Update enemy tank
     updateEnemy();
@@ -888,48 +1165,53 @@ function update() {
 }
 
 function updatePlayerMovement() {
-    const leftForce = player.leftTreadForward ? 1 : (player.leftTreadBackward ? -1 : 0);
-    const rightForce = player.rightTreadForward ? 1 : (player.rightTreadBackward ? -1 : 0);
+    const oldX = player.x;
+    const oldY = player.y;
+    const oldAngle = player.angle;
     
-    // Calculate rotation and movement
-    if (leftForce !== 0 || rightForce !== 0) {
-        const oldX = player.x;
-        const oldY = player.y;
-        const oldAngle = player.angle;
-        
-        // Both treads same direction = move forward/backward
-        if (leftForce === rightForce) {
-            player.x += Math.cos(player.angle) * MOVE_SPEED * leftForce;
-            player.y += Math.sin(player.angle) * MOVE_SPEED * leftForce;
-        }
-        // Different forces = rotation
-        else {
-            const rotationDelta = (rightForce - leftForce) * ROTATION_SPEED;
-            player.angle += rotationDelta;
-            
-            // Single tread creates rotation around that tread
-            if (leftForce === 0 && rightForce !== 0) {
-                // Rotating around left tread
-                const pivotX = player.x - Math.cos(player.angle - Math.PI / 2) * 10;
-                const pivotY = player.y - Math.sin(player.angle - Math.PI / 2) * 10;
-                player.x = pivotX + Math.cos(player.angle - Math.PI / 2) * 10;
-                player.y = pivotY + Math.sin(player.angle - Math.PI / 2) * 10;
-            } else if (rightForce === 0 && leftForce !== 0) {
-                // Rotating around right tread
-                const pivotX = player.x + Math.cos(player.angle - Math.PI / 2) * 10;
-                const pivotY = player.y + Math.sin(player.angle - Math.PI / 2) * 10;
-                player.x = pivotX - Math.cos(player.angle - Math.PI / 2) * 10;
-                player.y = pivotY - Math.sin(player.angle - Math.PI / 2) * 10;
-            }
-        }
-        
-        // Check collision with obstacles and boundaries
-        if (checkTankCollision(player) || player.x < TANK_SIZE || player.x > canvas.width - TANK_SIZE ||
-            player.y < TANK_SIZE || player.y > canvas.height - TANK_SIZE) {
-            player.x = oldX;
-            player.y = oldY;
-            player.angle = oldAngle;
-        }
+    // Handle rotation (A = turn left, D = turn right)
+    // With -yaw in camera, increasing angle turns view right, decreasing turns view left
+    if (keys['a']) {
+        player.angle += ROTATION_SPEED; // Turn left - things on your left come into view
+    }
+    if (keys['d']) {
+        player.angle -= ROTATION_SPEED; // Turn right - things on your right come into view
+    }
+    
+    // Handle forward/backward movement (W = forward, S = backward)
+    if (keys['w']) {
+        // Set target velocity for forward movement
+        player.targetVelocity = TANK_MAX_SPEED;
+    } else if (keys['s']) {
+        // Set target velocity for backward movement
+        player.targetVelocity = -TANK_MAX_SPEED;
+    } else {
+        // No movement input - decelerate to stop
+        player.targetVelocity = 0;
+    }
+    
+    // Smoothly interpolate velocity toward target (acceleration/deceleration)
+    if (player.velocity < player.targetVelocity) {
+        player.velocity = Math.min(player.velocity + TANK_ACCELERATION, player.targetVelocity);
+    } else if (player.velocity > player.targetVelocity) {
+        player.velocity = Math.max(player.velocity - TANK_DECELERATION, player.targetVelocity);
+    }
+    
+    // Apply velocity to position
+    if (player.velocity !== 0) {
+        player.x += Math.cos(player.angle) * player.velocity;
+        player.y += Math.sin(player.angle) * player.velocity;
+    }
+    
+    // Apply boundary constraints
+    applyBoundaryConstraints(player);
+    
+    // Check collision with obstacles
+    if (checkTankCollision(player)) {
+        player.x = oldX;
+        player.y = oldY;
+        player.angle = oldAngle;
+        player.velocity = 0; // Stop immediately on collision
     }
 }
 
@@ -974,7 +1256,7 @@ function updateEnemy() {
         // Decrease search timeout
         enemy.searchTimeout--;
         if (enemy.searchTimeout <= 0) {
-            // Search timeout expired
+            // Search timeout expired - give up search
             lastKnownPlayerPos = null;
             enemy.state = 'idle';
         }
@@ -1012,9 +1294,11 @@ function updateEnemy() {
         enemy.x += Math.cos(enemy.angle) * currentMoveSpeed;
         enemy.y += Math.sin(enemy.angle) * currentMoveSpeed;
         
-        // Check collision
-        if (checkTankCollision(enemy) || enemy.x < TANK_SIZE || enemy.x > canvas.width - TANK_SIZE ||
-            enemy.y < TANK_SIZE || enemy.y > canvas.height - TANK_SIZE) {
+        // Apply boundary constraints
+        applyBoundaryConstraints(enemy);
+        
+        // Check collision with obstacles
+        if (checkTankCollision(enemy)) {
             enemy.x = oldX;
             enemy.y = oldY;
         }
@@ -1023,13 +1307,21 @@ function updateEnemy() {
     // Fire at player (only if hunting with clear line of sight)
     enemy.fireCooldown--;
     if (enemy.state === 'hunting' && hasLOS && enemy.fireCooldown <= 0 && !enemyShell) {
+        // Calculate aim error based on score and whether this is first shot
+        const aimError = calculateAimError(score, !enemy.hasFiredOnce);
+        const firingAngle = enemy.angle + aimError;
+        
+        // Apply enemy shell speed multiplier
+        const enemyShellSpeed = SHELL_SPEED * ENEMY_SHELL_SPEED_MULTIPLIER;
+        
         enemyShell = {
-            x: enemy.x + Math.cos(enemy.angle) * TANK_SIZE,
-            y: enemy.y + Math.sin(enemy.angle) * TANK_SIZE,
-            vx: Math.cos(enemy.angle) * SHELL_SPEED,
-            vy: Math.sin(enemy.angle) * SHELL_SPEED
+            x: enemy.x + Math.cos(firingAngle) * TANK_SIZE,
+            y: enemy.y + Math.sin(firingAngle) * TANK_SIZE,
+            vx: Math.cos(firingAngle) * enemyShellSpeed,
+            vy: Math.sin(firingAngle) * enemyShellSpeed
         };
         enemy.fireCooldown = ENEMY_FIRE_COOLDOWN;
+        enemy.hasFiredOnce = true; // Mark that enemy has fired
         audioSystem.playShoot();
     }
 }
@@ -1040,9 +1332,10 @@ function updateShells() {
         playerShell.x += playerShell.vx;
         playerShell.y += playerShell.vy;
         
-        // Remove if out of bounds
-        if (playerShell.x < 0 || playerShell.x > canvas.width ||
-            playerShell.y < 0 || playerShell.y > canvas.height) {
+        // Destroy if reaches playfield boundaries
+        if (playerShell.x < 0 || playerShell.x > PLAYFIELD_WIDTH ||
+            playerShell.y < 0 || playerShell.y > PLAYFIELD_HEIGHT) {
+            audioSystem.playImpact(); // Play impact sound when hitting boundary
             playerShell = null;
         }
     }
@@ -1052,9 +1345,10 @@ function updateShells() {
         enemyShell.x += enemyShell.vx;
         enemyShell.y += enemyShell.vy;
         
-        // Remove if out of bounds
-        if (enemyShell.x < 0 || enemyShell.x > canvas.width ||
-            enemyShell.y < 0 || enemyShell.y > canvas.height) {
+        // Destroy if reaches playfield boundaries
+        if (enemyShell.x < 0 || enemyShell.x > PLAYFIELD_WIDTH ||
+            enemyShell.y < 0 || enemyShell.y > PLAYFIELD_HEIGHT) {
+            audioSystem.playImpact(); // Play impact sound when hitting boundary
             enemyShell = null;
         }
     }
@@ -1156,7 +1450,7 @@ function drawStartScreen() {
     ctx.fillText('Press SPACE or click to start!', canvas.width / 2, canvas.height / 2 + 20);
     
     ctx.font = '16px Courier New';
-    ctx.fillText('Q/A: Left Tread  W/S: Right Tread  SPACE: Fire', canvas.width / 2, canvas.height / 2 + 60);
+    ctx.fillText('WASD to move/rotate, SPACE to fire', canvas.width / 2, canvas.height / 2 + 60);
 }
 
 function drawGame() {
@@ -1175,6 +1469,24 @@ function draw3DGame() {
     
     // 2. Collect all entities with their distances from camera for depth sorting
     const entities = [];
+    
+    // Add boundary walls (with frustum culling)
+    for (let boundary of boundaries) {
+        const centerX = boundary.x + boundary.width / 2;
+        const centerY = boundary.y + boundary.height / 2;
+        const distance = Math.hypot(centerX - camera.x, centerY - camera.y);
+        
+        // Frustum culling: skip objects too far away
+        if (distance > FRUSTUM_CULL_DISTANCE) {
+            continue;
+        }
+        
+        entities.push({
+            type: 'boundary',
+            data: boundary,
+            distance: distance
+        });
+    }
     
     // Add obstacles (with frustum culling)
     for (let obs of obstacles) {
@@ -1242,6 +1554,9 @@ function draw3DGame() {
     // 4. Render all entities in sorted order
     for (let entity of entities) {
         switch (entity.type) {
+            case 'boundary':
+                draw3DBoundary(entity.data);
+                break;
             case 'obstacle':
                 draw3DObstacle(entity.data);
                 break;
@@ -1262,6 +1577,24 @@ function draw3DGame() {
     ctx.font = '24px Courier New';
     ctx.textAlign = 'left';
     ctx.fillText('Score: ' + score, 20, 40);
+    
+    // Debug info
+    ctx.font = '16px Courier New';
+    const angleDegrees = Math.round((player.angle * 180 / Math.PI + 360) % 360);
+    ctx.fillText('Angle: ' + angleDegrees + '°', 20, 70);
+    ctx.fillText('Pos: ' + Math.round(player.x) + ', ' + Math.round(player.y), 20, 90);
+}
+
+/**
+ * Draw a boundary wall as a 3D box
+ * @param {Object} boundary - Boundary with x, y, width, height properties
+ */
+function draw3DBoundary(boundary) {
+    const centerX = boundary.x + boundary.width / 2;
+    const centerY = boundary.y + boundary.height / 2;
+    const height = 50; // Height of boundary wall in 3D space (taller than obstacles)
+    
+    draw3DBox(centerX, centerY, 0, boundary.width, height, boundary.height);
 }
 
 /**
