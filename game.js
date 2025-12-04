@@ -1,3 +1,4 @@
+// Version: Back-face culling with proper occlusion v1.7
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -468,6 +469,157 @@ function draw3DLine(x1, y1, z1, x2, y2, z2) {
 }
 
 /**
+ * Get box faces for global depth-sorted rendering with back-face culling
+ * @param {number} x - Center X coordinate in world space
+ * @param {number} y - Center Y coordinate in world space
+ * @param {number} z - Center Z coordinate in world space (bottom of box)
+ * @param {number} width - Width of box (X dimension)
+ * @param {number} height - Height of box (Z dimension, vertical)
+ * @param {number} depth - Depth of box (Y dimension)
+ * @returns {Array} Array of face objects with distance and projected vertices (only front-facing)
+ */
+function getBoxFacesForRendering(x, y, z, width, height, depth) {
+    const x1 = x - width / 2;
+    const x2 = x + width / 2;
+    const y1 = y - depth / 2;
+    const y2 = y + depth / 2;
+    const z1 = z;
+    const z2 = z + height;
+    
+    const vertices = [
+        [x1, y1, z1], [x2, y1, z1], [x2, y2, z1], [x1, y2, z1],
+        [x1, y1, z2], [x2, y1, z2], [x2, y2, z2], [x1, y2, z2]
+    ];
+    
+    const faceDefinitions = [
+        { indices: [0, 1, 5, 4], edges: [[0,1], [1,5], [5,4], [4,0]] }, // Front
+        { indices: [1, 2, 6, 5], edges: [[1,2], [2,6], [6,5], [5,1]] }, // Right
+        { indices: [2, 3, 7, 6], edges: [[2,3], [3,7], [7,6], [6,2]] }, // Back
+        { indices: [3, 0, 4, 7], edges: [[3,0], [0,4], [4,7], [7,3]] }, // Left
+        { indices: [4, 5, 6, 7], edges: [[4,5], [5,6], [6,7], [7,4]] }, // Top
+        { indices: [3, 2, 1, 0], edges: [[3,2], [2,1], [1,0], [0,3]] }  // Bottom
+    ];
+    
+    const projectedVertices = vertices.map(v => project3D(v[0], v[1], v[2]));
+    
+    // Calculate face distances and check if facing camera
+    const faces = [];
+    for (let faceDef of faceDefinitions) {
+        const faceVertices = faceDef.indices.map(i => vertices[i]);
+        const centerX = faceVertices.reduce((sum, v) => sum + v[0], 0) / 4;
+        const centerY = faceVertices.reduce((sum, v) => sum + v[1], 0) / 4;
+        const centerZ = faceVertices.reduce((sum, v) => sum + v[2], 0) / 4;
+        
+        // Calculate face normal using cross product
+        const v0 = faceVertices[0];
+        const v1 = faceVertices[1];
+        const v2 = faceVertices[2];
+        
+        const edge1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+        const edge2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+        
+        const normal = [
+            edge1[1] * edge2[2] - edge1[2] * edge2[1],
+            edge1[2] * edge2[0] - edge1[0] * edge2[2],
+            edge1[0] * edge2[1] - edge1[1] * edge2[0]
+        ];
+        
+        // Vector from face center to camera
+        const toCamera = [camera.x - centerX, camera.y - centerY, camera.z - centerZ];
+        
+        // Dot product: if positive, face is pointing toward camera
+        const dotProduct = normal[0] * toCamera[0] + normal[1] * toCamera[1] + normal[2] * toCamera[2];
+        
+        // Only include front-facing faces
+        if (dotProduct > 0) {
+            const dx = centerX - camera.x;
+            const dy = centerY - camera.y;
+            const dz = centerZ - camera.z;
+            const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            
+            faces.push({
+                distance: distance,
+                projectedVertices: faceDef.indices.map(i => projectedVertices[i]),
+                edges: faceDef.edges,
+                vertices: vertices
+            });
+        }
+    }
+    
+    return faces;
+}
+
+/**
+ * Draw filled faces of a 3D box (for opacity)
+ * @param {number} x - Center X coordinate in world space
+ * @param {number} y - Center Y coordinate in world space
+ * @param {number} z - Center Z coordinate in world space (bottom of box)
+ * @param {number} width - Width of box (X dimension)
+ * @param {number} height - Height of box (Z dimension, vertical)
+ * @param {number} depth - Depth of box (Y dimension)
+ */
+function draw3DBoxFilled(x, y, z, width, height, depth) {
+    const x1 = x - width / 2;
+    const x2 = x + width / 2;
+    const y1 = y - depth / 2;
+    const y2 = y + depth / 2;
+    const z1 = z;
+    const z2 = z + height;
+    
+    const vertices = [
+        [x1, y1, z1], [x2, y1, z1], [x2, y2, z1], [x1, y2, z1],
+        [x1, y1, z2], [x2, y1, z2], [x2, y2, z2], [x1, y2, z2]
+    ];
+    
+    const faceDefinitions = [
+        { indices: [0, 1, 5, 4] }, // Front
+        { indices: [1, 2, 6, 5] }, // Right
+        { indices: [2, 3, 7, 6] }, // Back
+        { indices: [3, 0, 4, 7] }, // Left
+        { indices: [4, 5, 6, 7] }, // Top
+        { indices: [3, 2, 1, 0] }  // Bottom
+    ];
+    
+    const projectedVertices = vertices.map(v => project3D(v[0], v[1], v[2]));
+    
+    // Calculate face distances and sort
+    const faces = faceDefinitions.map(faceDef => {
+        const faceVertices = faceDef.indices.map(i => vertices[i]);
+        const centerX = faceVertices.reduce((sum, v) => sum + v[0], 0) / 4;
+        const centerY = faceVertices.reduce((sum, v) => sum + v[1], 0) / 4;
+        const centerZ = faceVertices.reduce((sum, v) => sum + v[2], 0) / 4;
+        
+        const dx = centerX - camera.x;
+        const dy = centerY - camera.y;
+        const dz = centerZ - camera.z;
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        
+        return {
+            distance: distance,
+            projectedVertices: faceDef.indices.map(i => projectedVertices[i])
+        };
+    });
+    
+    // Sort faces by distance (far to near)
+    faces.sort((a, b) => b.distance - a.distance);
+    
+    // Draw filled faces
+    for (let face of faces) {
+        // Check if all vertices are visible (not null and not behind camera)
+        if (face.projectedVertices.every(v => v !== null)) {
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.moveTo(face.projectedVertices[0].x, face.projectedVertices[0].y);
+            for (let i = 1; i < face.projectedVertices.length; i++) {
+                ctx.lineTo(face.projectedVertices[i].x, face.projectedVertices[i].y);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+}
+
+/**
  * Draw a 3D wireframe box (rectangular prism)
  * @param {number} x - Center X coordinate in world space
  * @param {number} y - Center Y coordinate in world space
@@ -478,7 +630,6 @@ function draw3DLine(x1, y1, z1, x2, y2, z2) {
  */
 function draw3DBox(x, y, z, width, height, depth) {
     // Calculate the 8 vertices of the box
-    // Bottom face (z = z)
     const x1 = x - width / 2;
     const x2 = x + width / 2;
     const y1 = y - depth / 2;
@@ -486,31 +637,19 @@ function draw3DBox(x, y, z, width, height, depth) {
     const z1 = z;
     const z2 = z + height;
     
-    // Define the 8 corners
     const vertices = [
-        // Bottom face
-        [x1, y1, z1], // 0: front-left-bottom
-        [x2, y1, z1], // 1: front-right-bottom
-        [x2, y2, z1], // 2: back-right-bottom
-        [x1, y2, z1], // 3: back-left-bottom
-        // Top face
-        [x1, y1, z2], // 4: front-left-top
-        [x2, y1, z2], // 5: front-right-top
-        [x2, y2, z2], // 6: back-right-top
-        [x1, y2, z2]  // 7: back-left-top
+        [x1, y1, z1], [x2, y1, z1], [x2, y2, z1], [x1, y2, z1],
+        [x1, y1, z2], [x2, y1, z2], [x2, y2, z2], [x1, y2, z2]
     ];
     
     // Define the 12 edges (pairs of vertex indices)
     const edges = [
-        // Bottom face
         [0, 1], [1, 2], [2, 3], [3, 0],
-        // Top face
         [4, 5], [5, 6], [6, 7], [7, 4],
-        // Vertical edges
         [0, 4], [1, 5], [2, 6], [3, 7]
     ];
     
-    // Draw all edges
+    // Draw wireframe edges
     ctx.strokeStyle = PURPLE;
     ctx.lineWidth = 2;
     
@@ -519,6 +658,24 @@ function draw3DBox(x, y, z, width, height, depth) {
         const v2 = vertices[edge[1]];
         draw3DLine(v1[0], v1[1], v1[2], v2[0], v2[1], v2[2]);
     }
+}
+
+/**
+ * Draw filled faces of a 3D tank (for opacity)
+ * @param {number} x - Tank X coordinate in world space
+ * @param {number} y - Tank Y coordinate in world space
+ * @param {number} z - Tank Z coordinate in world space (ground level)
+ * @param {number} angle - Tank facing angle in radians
+ */
+function draw3DTankFilled(x, y, z, angle) {
+    // Tank dimensions
+    const bodyWidth = 20;
+    const bodyDepth = 15;
+    const bodyHeight = 10;
+    
+    // For now, just draw the tank body as a filled box
+    // (Turret and barrel are thin enough to not need filling)
+    draw3DBoxFilled(x, y, z, bodyWidth, bodyHeight, bodyDepth);
 }
 
 /**
@@ -1605,24 +1762,62 @@ function draw3DGame() {
         }
     }
     
-    // 3. Sort entities by distance (far to near) for proper rendering order
-    entities.sort((a, b) => b.distance - a.distance);
+    // 3. Collect ALL faces from ALL entities for global depth sorting
+    const allFaces = [];
     
-    // 4. Render all entities in sorted order
     for (let entity of entities) {
+        let faces = [];
         switch (entity.type) {
             case 'boundary':
-                draw3DBoundary(entity.data);
+                const bCenterX = entity.data.x + entity.data.width / 2;
+                const bCenterY = entity.data.y + entity.data.height / 2;
+                faces = getBoxFacesForRendering(bCenterX, bCenterY, 0, entity.data.width, 50, entity.data.height);
                 break;
             case 'obstacle':
-                draw3DObstacle(entity.data);
+                const oCenterX = entity.data.x + entity.data.width / 2;
+                const oCenterY = entity.data.y + entity.data.height / 2;
+                faces = getBoxFacesForRendering(oCenterX, oCenterY, 0, entity.data.width, 40, entity.data.height);
                 break;
             case 'enemy':
-                draw3DTank(entity.data.x, entity.data.y, 0, entity.data.angle);
+                // For tank, just use body box for now
+                faces = getBoxFacesForRendering(entity.data.x, entity.data.y, 0, 20, 10, 15);
                 break;
-            case 'shell':
-                draw3DShell(entity.data);
-                break;
+        }
+        allFaces.push(...faces);
+    }
+    
+    // 4. Sort ALL faces by distance (far to near)
+    allFaces.sort((a, b) => b.distance - a.distance);
+    
+    // 5. Draw all filled faces AND their wireframe edges in sorted order
+    for (let face of allFaces) {
+        if (face.projectedVertices.every(v => v !== null)) {
+            // Draw filled face
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.moveTo(face.projectedVertices[0].x, face.projectedVertices[0].y);
+            for (let i = 1; i < face.projectedVertices.length; i++) {
+                ctx.lineTo(face.projectedVertices[i].x, face.projectedVertices[i].y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            
+            // Draw wireframe edges for this face
+            ctx.strokeStyle = PURPLE;
+            ctx.lineWidth = 2;
+            for (let edge of face.edges) {
+                const v1 = face.vertices[edge[0]];
+                const v2 = face.vertices[edge[1]];
+                draw3DLine(v1[0], v1[1], v1[2], v2[0], v2[1], v2[2]);
+            }
+        }
+    }
+    
+    // 6. Draw shells (they're small and don't need face culling)
+    entities.sort((a, b) => b.distance - a.distance);
+    for (let entity of entities) {
+        if (entity.type === 'shell') {
+            draw3DShell(entity.data);
         }
     }
     
@@ -1643,6 +1838,18 @@ function draw3DGame() {
 }
 
 /**
+ * Draw filled faces of a boundary wall (for opacity)
+ * @param {Object} boundary - Boundary with x, y, width, height properties
+ */
+function draw3DBoundaryFilled(boundary) {
+    const centerX = boundary.x + boundary.width / 2;
+    const centerY = boundary.y + boundary.height / 2;
+    const height = 50;
+    
+    draw3DBoxFilled(centerX, centerY, 0, boundary.width, height, boundary.height);
+}
+
+/**
  * Draw a boundary wall as a 3D box
  * @param {Object} boundary - Boundary with x, y, width, height properties
  */
@@ -1652,6 +1859,18 @@ function draw3DBoundary(boundary) {
     const height = 50; // Height of boundary wall in 3D space (taller than obstacles)
     
     draw3DBox(centerX, centerY, 0, boundary.width, height, boundary.height);
+}
+
+/**
+ * Draw filled faces of an obstacle (for opacity)
+ * @param {Object} obs - Obstacle with x, y, width, height properties
+ */
+function draw3DObstacleFilled(obs) {
+    const centerX = obs.x + obs.width / 2;
+    const centerY = obs.y + obs.height / 2;
+    const height = 40;
+    
+    draw3DBoxFilled(centerX, centerY, 0, obs.width, height, obs.height);
 }
 
 /**

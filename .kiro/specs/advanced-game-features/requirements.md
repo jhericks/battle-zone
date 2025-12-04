@@ -19,6 +19,10 @@ This document specifies enhancements to the existing BattleZone-style tank game 
 - **First-Person View**: 3D camera perspective positioned at the player tank's location looking in its facing direction
 - **3D Polygon**: Simple geometric shape rendered in three-dimensional space using vertices and faces
 - **3D Renderer**: Component that projects 3D coordinates onto the 2D canvas using perspective projection
+- **Aim Error**: Angular offset applied to enemy firing direction to reduce accuracy
+- **Difficulty Level**: Game challenge determined by the player's current score
+- **Playfield**: The bounded rectangular area within which gameplay occurs
+- **Field of Vision (FOV)**: The angular extent of the observable game world visible through the camera
 
 ## Requirements
 
@@ -84,35 +88,43 @@ This document specifies enhancements to the existing BattleZone-style tank game 
 
 ### Requirement 5
 
-**User Story:** As a player, I want balanced difficulty with forgiving enemy accuracy and intuitive controls, so that the game is challenging but fair and enjoyable to play.
+**User Story:** As a player, I want balanced difficulty with forgiving enemy accuracy, so that the game is challenging but fair and enjoyable to play.
 
 #### Acceptance Criteria
 
-**Enemy Accuracy & Difficulty:**
-
 1. WHEN the Enemy Tank fires a shell THEN the Game System SHALL apply an aim error offset to the firing angle based on the current difficulty level
-2. WHEN the player score is 0 (level 1) THEN the Enemy Tank's first shot SHALL have a guaranteed miss by applying a minimum aim error of at least 15 degrees
-3. WHEN calculating aim error THEN the Game System SHALL use a random offset that decreases gradually as the player's score increases but never reaches perfect accuracy
-4. WHEN the Enemy Tank fires THEN the shell speed SHALL be 60% of the Player Tank's shell speed to give the player reaction time
-5. WHEN the Enemy Tank has an active shell in play THEN the Enemy Tank SHALL NOT fire another shell until the current shell is destroyed or off-screen
+2. WHEN the player score is 0 and the Enemy Tank has not fired before THEN the Game System SHALL apply a minimum aim error of at least 15 degrees to guarantee a miss
+3. WHEN calculating aim error THEN the Game System SHALL use a random offset that decreases gradually as the player score increases
+4. WHEN calculating aim error for any score value THEN the Game System SHALL maintain a minimum non-zero error threshold
+5. WHEN the Enemy Tank creates a shell THEN the shell speed SHALL be 60 percent of the Player Tank shell speed
+6. WHEN the Enemy Tank has an active shell in play THEN the Enemy Tank SHALL NOT fire another shell until the current shell is destroyed or leaves the playfield
 
-**Player Controls:**
+### Requirement 6
 
-6. WHEN the player presses W THEN the Player Tank SHALL move forward in its current facing direction
-7. WHEN the player presses S THEN the Player Tank SHALL move backward in its current facing direction
-8. WHEN the player presses A THEN the Player Tank SHALL rotate counter-clockwise (left)
-9. WHEN the player presses D THEN the Player Tank SHALL rotate clockwise (right)
-10. WHEN the player presses SPACE THEN the Player Tank SHALL fire a shell (if no active shell exists)
-11. WHEN the game starts THEN the Game System SHALL display the updated control scheme: "WASD to move/rotate, SPACE to fire"
-12. WHEN the player begins pressing a movement key THEN the Player Tank SHALL gradually accelerate from its current speed toward maximum speed
-13. WHEN the player releases a movement key THEN the Player Tank SHALL gradually decelerate from its current speed toward zero
-14. WHILE the Player Tank is accelerating or decelerating THEN the velocity SHALL change smoothly at a constant acceleration rate
+**User Story:** As a player, I want intuitive WASD movement controls, so that I can easily maneuver my tank during combat.
 
-**Field of Vision & Playfield:**
+#### Acceptance Criteria
 
-12. WHEN rendering in first-person view THEN the Camera System SHALL use a field of vision of at least 90 degrees (wider than current)
-13. WHEN initializing the game THEN the Game System SHALL set the playfield dimensions to at least 2000x2000 units (significantly larger than viewport)
-14. WHEN rendering the playfield boundaries THEN the Game System SHALL draw clear purple wireframe walls at the edges of the playfield
-15. WHEN the Player Tank or Enemy Tank attempts to move beyond playfield boundaries THEN the Game System SHALL prevent movement past the boundary walls
-16. WHEN a shell reaches the playfield boundary THEN the Game System SHALL destroy the shell and optionally play an impact effect
-17. WHEN initializing obstacles THEN the Game System SHALL scale the number of obstacles proportionally to maintain similar density as the original playfield size
+1. WHEN the player presses W THEN the Player Tank SHALL move forward in its current facing direction
+2. WHEN the player presses S THEN the Player Tank SHALL move backward in its current facing direction
+3. WHEN the player presses A THEN the Player Tank SHALL rotate counter-clockwise
+4. WHEN the player presses D THEN the Player Tank SHALL rotate clockwise
+5. WHEN the player presses SPACE and no active shell exists THEN the Player Tank SHALL fire a shell
+6. WHEN the game enters the start state THEN the Game System SHALL display the control scheme text "WASD to move/rotate, SPACE to fire"
+7. WHEN the player begins pressing a movement key THEN the Player Tank SHALL gradually accelerate from its current speed toward maximum speed
+8. WHEN the player releases a movement key THEN the Player Tank SHALL gradually decelerate from its current speed toward zero
+9. WHILE the Player Tank is accelerating or decelerating THEN the velocity SHALL change at a constant acceleration rate per frame
+
+### Requirement 7
+
+**User Story:** As a player, I want a larger playfield with clear boundaries and better visibility, so that I have more tactical space to maneuver and plan attacks.
+
+#### Acceptance Criteria
+
+1. WHEN initializing the game THEN the Game System SHALL set the playfield dimensions to 2000 by 2000 units
+2. WHEN rendering in first-person view THEN the Camera System SHALL use a field of vision of 90 degrees
+3. WHEN rendering the playfield boundaries THEN the Game System SHALL draw purple wireframe walls at the edges of the playfield
+4. WHEN the Player Tank attempts to move beyond playfield boundaries THEN the Game System SHALL prevent movement past the boundary walls
+5. WHEN the Enemy Tank attempts to move beyond playfield boundaries THEN the Game System SHALL prevent movement past the boundary walls
+6. WHEN a shell position exceeds the playfield boundary THEN the Game System SHALL destroy the shell
+7. WHEN initializing obstacles THEN the Game System SHALL scale the number of obstacles proportionally to the playfield area to maintain similar density as the original playfield
