@@ -175,10 +175,138 @@
 - [x] 16. Final Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [x] 17. Polish and optimization
+a- [x] 17. Implement continuous engine sound system
+  - Create engineSound object with oscillator and gain nodes
+  - Implement updateEngineSound(isMoving) function
+  - Add smooth frequency/gain transitions using linear ramps
+  - Set idle frequency (40-60Hz) and acceleration frequency (80-120Hz)
+  - Integrate into game loop to update based on player velocity
+  - _Requirements: 1.5, 1.6, 1.7_
+
+- [ ]* 17.1 Write property test for idle engine sound
+  - **Property 19: Idle engine sound plays when stationary**
+  - **Validates: Requirements 1.5**
+
+- [ ]* 17.2 Write property test for engine sound increase
+  - **Property 20: Engine sound increases with movement**
+  - **Validates: Requirements 1.6**
+
+- [ ]* 17.3 Write property test for smooth engine transitions
+  - **Property 21: Engine sound transitions smoothly**
+  - **Validates: Requirements 1.7**
+
+- [x] 18. Implement difficulty balancing system
+  - Add difficulty constants (MIN_AIM_ERROR, MAX_AIM_ERROR, AIM_IMPROVEMENT_RATE)
+  - Create calculateAimError(score) function
+  - Add enemy.hasFiredOnce flag to track first shot
+  - Modify enemy firing logic to apply aim error offset
+  - Set ENEMY_SHELL_SPEED_MULTIPLIER to 0.6
+  - Apply speed multiplier when creating enemy shells
+  - _Requirements: 5.1, 5.2, 5.3, 5.4_
+
+- [ ]* 18.1 Write property test for aim error application
+  - **Property 22: Enemy firing applies aim error**
+  - **Validates: Requirements 5.1**
+
+- [ ]* 18.2 Write property test for aim error decrease
+  - **Property 23: Aim error decreases with score**
+  - **Validates: Requirements 5.3**
+
+- [ ]* 18.3 Write property test for minimum aim error
+  - **Property 24: Aim error never reaches zero**
+  - **Validates: Requirements 5.3**
+
+- [ ]* 18.4 Write property test for enemy shell speed
+  - **Property 25: Enemy shell speed is 60% of player speed**
+  - **Validates: Requirements 5.4**
+
+- [ ]* 18.5 Write property test for one shell constraint
+  - **Property 26: Enemy fires only one shell at a time**
+  - **Validates: Requirements 5.5**
+
+- [x] 19. Implement tank acceleration system
+  - Add player.velocity and player.targetVelocity properties
+  - Add TANK_MAX_SPEED, TANK_ACCELERATION, TANK_DECELERATION constants
+  - Modify updatePlayerMovement() to use acceleration/deceleration
+  - Smoothly interpolate velocity toward target based on input
+  - Apply velocity to position instead of instant movement
+  - _Requirements: 5.12, 5.13, 5.14_
+
+- [ ]* 19.1 Write property test for gradual acceleration
+  - **Property 34: Tank acceleration is gradual**
+  - **Validates: Requirements 5.12, 5.14**
+
+- [ ]* 19.2 Write property test for gradual deceleration
+  - **Property 35: Tank deceleration is gradual**
+  - **Validates: Requirements 5.13, 5.14**
+
+- [x] 20. Redesign control system to WASD
+  - Update key event handlers to use W/A/S/D instead of Q/A/W/S
+  - Map W to forward, S to backward, A to rotate left, D to rotate right
+  - Update start screen instructions to show "WASD to move/rotate, SPACE to fire"
+  - Remove dual-tread control logic
+  - Test all control combinations
+  - _Requirements: 5.6, 5.7, 5.8, 5.9, 5.10, 5.11_
+
+- [ ]* 20.1 Write property test for W key forward movement
+  - **Property 27: W key moves player forward**
+  - **Validates: Requirements 5.6**
+
+- [ ]* 20.2 Write property test for S key backward movement
+  - **Property 28: S key moves player backward**
+  - **Validates: Requirements 5.7**
+
+- [ ]* 20.3 Write property test for A key rotation
+  - **Property 29: A key rotates player left**
+  - **Validates: Requirements 5.8**
+
+- [ ]* 20.4 Write property test for D key rotation
+  - **Property 30: D key rotates player right**
+  - **Validates: Requirements 5.9**
+
+- [ ]* 20.5 Write property test for Space key firing
+  - **Property 31: Space key fires shell**
+  - **Validates: Requirements 5.10**
+
+- [x] 21. Expand playfield and add boundaries
+  - Set PLAYFIELD_WIDTH and PLAYFIELD_HEIGHT to 2000
+  - Create boundary wall objects at playfield edges
+  - Implement applyBoundaryConstraints(entity) function
+  - Apply constraints to player and enemy movement
+  - Destroy shells that reach boundaries
+  - Render boundary walls as 3D wireframe prisms
+  - _Requirements: 5.13, 5.14, 5.15, 5.16_
+
+- [ ]* 21.1 Write property test for boundary constraints
+  - **Property 32: Tanks cannot move beyond boundaries**
+  - **Validates: Requirements 5.15**
+
+- [ ]* 21.2 Write property test for shell destruction at boundaries
+  - **Property 33: Shells are destroyed at boundaries**
+  - **Validates: Requirements 5.16**
+
+- [x] 22. Scale obstacles for larger playfield
+  - Calculate obstacle count based on area ratio (new_area / old_area * old_count)
+  - Update initializeObstacles() to create ~20-25 obstacles
+  - Distribute obstacles across larger playfield using spatial distribution
+  - Ensure obstacles don't spawn too close to player/enemy start positions
+  - _Requirements: 5.17_
+
+- [x] 23. Widen field of vision
+  - Update camera.fov to Math.PI / 2 (90 degrees)
+  - Recalculate focal length based on new FOV
+  - Test rendering with wider perspective
+  - _Requirements: 5.12_
+
+- [x] 24. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 25. Polish and optimization
   - Add object culling (don't render objects outside view frustum)
   - Optimize particle count and rendering
   - Tune audio levels and timing
   - Adjust AI behavior parameters for gameplay feel
+  - Test difficulty curve across score ranges
+  - Tune acceleration/deceleration feel
   - Test performance and optimize as needed
   - _Requirements: All_

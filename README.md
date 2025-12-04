@@ -1,13 +1,13 @@
 # BattleZone Tank Game
 
-A retro-style 3D tank combat game inspired by the classic BattleZone arcade game, featuring first-person wireframe graphics and dual-tread tank controls.
+A retro-style 3D tank combat game inspired by the classic BattleZone arcade game, featuring first-person wireframe graphics and intuitive WASD controls.
 
 ![Game Preview](kiro-logo.png)
 
 ## 🎮 Game Features
 
 - **3D First-Person Perspective**: Immersive wireframe graphics with proper depth sorting and perspective projection
-- **Realistic Tank Controls**: Dual-tread control system for authentic tank movement
+- **Intuitive Controls**: WASD movement and rotation for easy gameplay
 - **Smart Enemy AI**: Enemy tanks with line-of-sight detection, state-based behavior (hunting, searching, idle), and sound-based awareness
 - **Dynamic Difficulty**: Enemy speed increases with each kill for escalating challenge
 - **Retro Audio**: Procedurally generated sound effects using Web Audio API
@@ -17,16 +17,10 @@ A retro-style 3D tank combat game inspired by the classic BattleZone arcade game
 ## 🕹️ Controls
 
 ### Tank Movement
-- **Q**: Left tread forward (turn right when used alone)
-- **A**: Left tread backward (turn left when used alone)
-- **W**: Right tread forward (turn left when used alone)
-- **S**: Right tread backward (turn right when used alone)
-
-### Combined Controls
-- **Q + W**: Move forward
-- **A + S**: Move backward
-- **Q + S**: Turn right in place
-- **A + W**: Turn left in place
+- **W**: Move forward
+- **S**: Move backward
+- **A**: Rotate left (counter-clockwise)
+- **D**: Rotate right (clockwise)
 
 ### Combat
 - **SPACE**: Fire shell (one shot at a time)

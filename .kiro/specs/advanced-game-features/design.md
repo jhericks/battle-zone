@@ -2,12 +2,15 @@
 
 ## Overview
 
-This design document outlines the architecture and implementation approach for adding four major enhancements to the existing BattleZone-style tank game:
+This design document outlines the architecture and implementation approach for adding major enhancements to the existing BattleZone-style tank game:
 
-1. **Retro Audio System**: Web Audio API-based sound effects for shooting, explosions, impacts, and game over events
+1. **Retro Audio System**: Web Audio API-based sound effects including shooting, explosions, impacts, game over events, and continuous engine sounds
 2. **Particle System**: Physics-based debris effects when tanks are destroyed
 3. **3D First-Person Renderer**: Simple polygon-based 3D graphics with perspective projection
 4. **Intelligent Enemy AI**: Directional line-of-sight detection and sound-based awareness
+5. **Difficulty Balancing**: Enemy aim error system, slower enemy projectiles, and progressive difficulty curve
+6. **Enhanced Controls**: Intuitive WASD movement and rotation controls
+7. **Expanded Playfield**: Larger game area with clear boundaries and wider field of vision
 
 The design maintains the existing game architecture while adding new modular systems that integrate cleanly with the current entity-based structure. The retro aesthetic is preserved through wireframe 3D rendering and synthesized audio effects.
 
@@ -94,6 +97,8 @@ const audioSystem = {
 - **Explosion**: 500ms white noise with low-pass filter sweep + bass tone
 - **Impact**: 150ms metallic clang using multiple oscillators
 - **Game Over**: 2-second descending tone sequence
+- **Engine Idle**: Continuous low-frequency oscillator (40-60Hz) with subtle modulation
+- **Engine Acceleration**: Pitch increases to 80-120Hz, volume increases 50%, adds harmonic overtones
 
 ### 2. Particle System
 
@@ -240,6 +245,140 @@ function hasLineOfSight(from, to) {
 - Enemy moves toward last known position
 - Clear last known position after timeout or when reached
 
+### 5. Difficulty Balancing System
+
+**Purpose**: Create fair, progressive difficulty through enemy aim error and projectile speed differences
+
+**Key Components**:
+- `calculateAimError(score)`: Returns aim offset in radians based on current difficulty
+- `ENEMY_SHELL_SPEED_MULTIPLIER`: Constant defining enemy shell speed as fraction of player speed (0.6)
+- `MIN_AIM_ERROR`: Minimum guaranteed miss angle for first shot (15 degrees)
+- `MAX_AIM_ERROR`: Maximum aim error at score 0 (20-25 degrees)
+- `AIM_IMPROVEMENT_RATE`: How quickly aim improves with score
+
+**Aim Error Formula**:
+```javascript
+function calculateAimError(score) {
+    // First shot always misses significantly
+    if (score === 0 && !enemy.hasFiredOnce) {
+        return (Math.random() - 0.5) * 2 * MIN_AIM_ERROR;
+    }
+    
+    // Progressive improvement: starts at MAX_AIM_ERROR, approaches but never reaches 0
+    const baseError = MAX_AIM_ERROR / (1 + score * AIM_IMPROVEMENT_RATE);
+    const minError = 3 * (Math.PI / 180); // Always at least 3 degrees of error
+    const actualError = Math.max(baseError, minError);
+    
+    // Random offset within error range
+    return (Math.random() - 0.5) * 2 * actualError;
+}
+```
+
+**Difficulty Curve Design**:
+- Score 0 (Level 1): 20-25° aim error, guaranteed first miss
+- Score 5: ~10° aim error
+- Score 10: ~6° aim error
+- Score 20+: ~3° aim error (never perfect)
+
+**Shell Speed Balancing**:
+- Player shell speed: Base speed (e.g., 8 pixels/frame)
+- Enemy shell speed: 60% of player speed (4.8 pixels/frame)
+- Gives player time to react and dodge
+
+### 6. Control System Redesign
+
+**Purpose**: Replace dual-tread controls with intuitive WASD movement
+
+**Control Mapping**:
+```javascript
+const controls = {
+    'w': () => moveForward(),      // Move in facing direction
+    's': () => moveBackward(),     // Move opposite to facing direction
+    'a': () => rotateLeft(),       // Rotate counter-clockwise
+    'd': () => rotateRight(),      // Rotate clockwise
+    ' ': () => fireShell()         // Fire (unchanged)
+};
+```
+
+**Movement Implementation**:
+- Forward/Backward: Apply velocity in direction of `player.angle`
+- Rotation: Modify `player.angle` by rotation speed constant
+- Simultaneous input: Allow W+A, W+D, S+A, S+D combinations for diagonal movement while rotating
+
+**Acceleration System**:
+```javascript
+const TANK_MAX_SPEED = 3.0;           // pixels per frame
+const TANK_ACCELERATION = 0.15;       // pixels per frame²
+const TANK_DECELERATION = 0.2;        // pixels per frame² (slightly faster stop)
+
+player = {
+    // ... existing properties ...
+    velocity: 0,                       // Current speed (-MAX_SPEED to +MAX_SPEED)
+    targetVelocity: 0                  // Desired speed based on input
+};
+
+function updatePlayerMovement() {
+    // Set target based on input
+    if (keys['w']) targetVelocity = TANK_MAX_SPEED;
+    else if (keys['s']) targetVelocity = -TANK_MAX_SPEED;
+    else targetVelocity = 0;
+    
+    // Smoothly interpolate toward target
+    if (velocity < targetVelocity) {
+        velocity = Math.min(velocity + TANK_ACCELERATION, targetVelocity);
+    } else if (velocity > targetVelocity) {
+        velocity = Math.max(velocity - TANK_DECELERATION, targetVelocity);
+    }
+    
+    // Apply velocity to position
+    player.x += Math.cos(player.angle) * velocity;
+    player.y += Math.sin(player.angle) * velocity;
+}
+```
+
+**Acceleration Feel**:
+- Time to max speed: ~20 frames (0.33 seconds at 60 FPS) - feels responsive but weighty
+- Time to stop: ~15 frames (0.25 seconds) - slightly quicker for better control
+- Creates tank-like momentum without feeling sluggish
+
+**UI Updates**:
+- Update start screen instructions: "WASD to move/rotate, SPACE to fire"
+- Remove references to Q/A/W/S dual-tread controls
+
+### 7. Playfield Expansion System
+
+**Purpose**: Create larger tactical space with clear boundaries and better visibility
+
+**Playfield Configuration**:
+```javascript
+const PLAYFIELD_WIDTH = 2000;   // Up from ~800
+const PLAYFIELD_HEIGHT = 2000;  // Up from ~600
+const VIEWPORT_WIDTH = 800;     // Canvas size unchanged
+const VIEWPORT_HEIGHT = 600;
+const FOV = Math.PI / 2;        // 90 degrees (up from ~60)
+```
+
+**Boundary Rendering**:
+- Draw purple wireframe walls at playfield edges
+- Walls rendered as 3D rectangular prisms (height: 50 units)
+- Visible from distance to provide spatial awareness
+
+**Boundary Collision**:
+- Prevent player/enemy movement beyond `[0, PLAYFIELD_WIDTH]` x `[0, PLAYFIELD_HEIGHT]`
+- Destroy shells that reach boundaries
+- Optional: Play impact sound/effect when shell hits boundary
+
+**Obstacle Scaling**:
+- Original playfield: ~800x600 with 3-4 obstacles
+- New playfield: 2000x2000 (6.9x area)
+- Scale to ~20-25 obstacles to maintain similar density
+- Distribute obstacles across playfield using spatial distribution algorithm
+
+**Camera FOV**:
+- Increase field of vision from ~60° to 90°
+- Adjust projection matrix focal length accordingly
+- Provides better peripheral awareness in first-person view
+
 ## Data Models
 
 ### Extended Enemy Object
@@ -255,7 +394,10 @@ enemy = {
     // New properties for AI
     state: 'idle' | 'hunting' | 'searching',
     lastKnownPlayerPos: { x: number, y: number } | null,
-    searchTimeout: number  // Frames to search before giving up
+    searchTimeout: number,  // Frames to search before giving up
+    
+    // New properties for difficulty
+    hasFiredOnce: boolean   // Track if enemy has fired at least once (for guaranteed first miss)
 }
 ```
 
@@ -286,9 +428,39 @@ camera = {
     z: number,
     yaw: number,
     pitch: number,
-    fov: number,
+    fov: number,        // Updated to Math.PI / 2 (90 degrees)
     near: number,
     far: number
+}
+```
+
+### Audio Engine State
+
+```javascript
+engineSound = {
+    oscillator: OscillatorNode | null,
+    gainNode: GainNode | null,
+    isPlaying: boolean,
+    currentFrequency: number,
+    targetFrequency: number,
+    currentGain: number,
+    targetGain: number
+}
+```
+
+### Playfield Configuration
+
+```javascript
+playfield = {
+    width: 2000,
+    height: 2000,
+    obstacleCount: 20,  // Scaled from original 3-4
+    boundaries: [
+        { x: 0, y: 0, width: 2000, height: 10 },      // Top wall
+        { x: 0, y: 1990, width: 2000, height: 10 },   // Bottom wall
+        { x: 0, y: 0, width: 10, height: 2000 },      // Left wall
+        { x: 1990, y: 0, width: 10, height: 2000 }    // Right wall
+    ]
 }
 ```
 
@@ -377,6 +549,82 @@ Property 18: Clear LOS enables normal behavior
 *For any* game state where line-of-sight is clear, the enemy should be rotating toward the player's current position and able to fire
 **Validates: Requirements 4.10**
 
+### Engine Sound Properties
+
+Property 19: Idle engine sound plays when stationary
+*For any* game state where the player tank has zero velocity, the engine sound should be playing at idle frequency and volume
+**Validates: Requirements 1.5**
+
+Property 20: Engine sound increases with movement
+*For any* game state where the player tank is moving, the engine sound frequency and gain should be higher than idle values
+**Validates: Requirements 1.6**
+
+Property 21: Engine sound transitions smoothly
+*For any* two consecutive frames where engine state changes, the frequency and gain changes should be gradual (bounded by maximum delta per frame)
+**Validates: Requirements 1.7**
+
+### Difficulty Balance Properties
+
+Property 22: Enemy firing applies aim error
+*For any* enemy firing event, the actual firing angle should differ from the perfect aim angle by some non-zero error amount
+**Validates: Requirements 5.1**
+
+Property 23: Aim error decreases with score
+*For any* two scores where score A < score B, the maximum aim error at score A should be greater than or equal to the maximum aim error at score B
+**Validates: Requirements 5.3**
+
+Property 24: Aim error never reaches zero
+*For any* score value, the calculated aim error range should always include a minimum non-zero error threshold
+**Validates: Requirements 5.3**
+
+Property 25: Enemy shell speed is 60% of player speed
+*For any* enemy shell created, its speed should equal 0.6 times the player shell speed
+**Validates: Requirements 5.4**
+
+Property 26: Enemy fires only one shell at a time
+*For any* game state, the enemy should have at most one active shell
+**Validates: Requirements 5.5**
+
+### Control System Properties
+
+Property 27: W key moves player forward
+*For any* player state, pressing W should result in position change in the direction of player.angle
+**Validates: Requirements 5.6**
+
+Property 28: S key moves player backward
+*For any* player state, pressing S should result in position change opposite to player.angle
+**Validates: Requirements 5.7**
+
+Property 29: A key rotates player left
+*For any* player state, pressing A should result in player.angle decreasing
+**Validates: Requirements 5.8**
+
+Property 30: D key rotates player right
+*For any* player state, pressing D should result in player.angle increasing
+**Validates: Requirements 5.9**
+
+Property 31: Space key fires shell
+*For any* player state with no active shell, pressing SPACE should create a new shell
+**Validates: Requirements 5.10**
+
+Property 34: Tank acceleration is gradual
+*For any* two consecutive frames where movement input is active, the change in velocity should not exceed the acceleration constant
+**Validates: Requirements 5.12, 5.14**
+
+Property 35: Tank deceleration is gradual
+*For any* two consecutive frames where no movement input is active, the change in velocity should not exceed the deceleration constant
+**Validates: Requirements 5.13, 5.14**
+
+### Playfield Properties
+
+Property 32: Tanks cannot move beyond boundaries
+*For any* tank position after movement update, the x and y coordinates should be within [0, PLAYFIELD_WIDTH] and [0, PLAYFIELD_HEIGHT]
+**Validates: Requirements 5.15**
+
+Property 33: Shells are destroyed at boundaries
+*For any* shell whose position is outside playfield bounds, that shell should not exist in the active shell list
+**Validates: Requirements 5.16**
+
 ## Error Handling
 
 ### Audio System Errors
@@ -422,6 +670,8 @@ Property 18: Clear LOS enables normal behavior
 - Test sound generation functions create valid audio nodes
 - Test sound playback triggers at correct game events
 - Test graceful degradation when audio unavailable
+- Test engine sound state transitions (idle to acceleration)
+- Test engine sound frequency and gain calculations
 
 **Particle System Tests**:
 - Test particle creation at specified positions
@@ -438,6 +688,24 @@ Property 18: Clear LOS enables normal behavior
 - Test line-of-sight with obstacle returns false
 - Test field-of-view angle calculations
 - Test last known position updates on player fire
+
+**Difficulty System Tests**:
+- Test aim error calculation for various scores
+- Test first shot guaranteed miss at score 0
+- Test aim error never reaches zero
+- Test enemy shell speed is 60% of player speed
+- Test enemy one-shell-at-a-time constraint
+
+**Control System Tests**:
+- Test WASD key mappings produce correct movement
+- Test rotation direction for A and D keys
+- Test forward/backward movement relative to facing angle
+
+**Playfield Tests**:
+- Test boundary collision prevents tank movement
+- Test shells are destroyed at boundaries
+- Test obstacle count scales with playfield size
+- Test FOV is at least 90 degrees
 
 ### Property-Based Testing
 
@@ -510,7 +778,7 @@ fc.assert(
 );
 ```
 
-3. **Camera Position Tracking** (Property 7):
+3. **Camera Position Tracking** (Property 8):
 ```javascript
 fc.assert(
   fc.property(
@@ -525,6 +793,68 @@ fc.assert(
       
       return Math.abs(camera.x - player.x) < 0.01 &&
              Math.abs(camera.y - player.y) < 0.01;
+    }
+  ),
+  { numRuns: 100 }
+);
+```
+
+4. **Aim Error Monotonic Decrease** (Property 23):
+```javascript
+fc.assert(
+  fc.property(
+    fc.record({
+      scoreA: fc.integer({ min: 0, max: 50 }),
+      scoreB: fc.integer({ min: 0, max: 50 })
+    }),
+    ({ scoreA, scoreB }) => {
+      if (scoreA >= scoreB) return true; // Only test when A < B
+      
+      const errorA = calculateMaxAimError(scoreA);
+      const errorB = calculateMaxAimError(scoreB);
+      
+      return errorA >= errorB;
+    }
+  ),
+  { numRuns: 100 }
+);
+```
+
+5. **Boundary Collision Prevention** (Property 32):
+```javascript
+fc.assert(
+  fc.property(
+    fc.record({
+      tankX: fc.float({ min: -100, max: 2100 }),
+      tankY: fc.float({ min: -100, max: 2100 }),
+      angle: fc.float({ min: 0, max: 2 * Math.PI }),
+      speed: fc.float({ min: 1, max: 10 })
+    }),
+    ({ tankX, tankY, angle, speed }) => {
+      const tank = { x: tankX, y: tankY, angle, speed };
+      updateTankPosition(tank);
+      applyBoundaryConstraints(tank);
+      
+      return tank.x >= 0 && tank.x <= PLAYFIELD_WIDTH &&
+             tank.y >= 0 && tank.y <= PLAYFIELD_HEIGHT;
+    }
+  ),
+  { numRuns: 100 }
+);
+```
+
+6. **Enemy Shell Speed Ratio** (Property 25):
+```javascript
+fc.assert(
+  fc.property(
+    fc.record({
+      playerShellSpeed: fc.float({ min: 5, max: 15 })
+    }),
+    ({ playerShellSpeed }) => {
+      const enemyShell = createEnemyShell(playerShellSpeed);
+      const expectedSpeed = playerShellSpeed * 0.6;
+      
+      return Math.abs(enemyShell.speed - expectedSpeed) < 0.01;
     }
   ),
   { numRuns: 100 }
@@ -579,6 +909,18 @@ fc.assert(
 - Reuse audio nodes when possible
 - Limit concurrent sounds (e.g., max 5 simultaneous)
 - Use short sound durations to reduce memory usage
+- Keep engine sound oscillator running continuously, modulate frequency/gain
+- Use smooth transitions (linear ramps) for engine sound changes to avoid clicks
+
+**Difficulty System**:
+- Store aim error calculation in constants for easy tuning
+- Track enemy.hasFiredOnce flag to implement guaranteed first miss
+- Use Math.random() for aim error to ensure unpredictability
+
+**Playfield System**:
+- Use spatial hashing or grid-based distribution for obstacle placement
+- Render only visible portions of large playfield (viewport culling)
+- Scale obstacle count proportionally: (new_area / old_area) * old_count
 
 ### Browser Compatibility
 
@@ -599,10 +941,19 @@ fc.assert(
 ```javascript
 // Constants
 // ... existing constants ...
-// ... new constants for audio, particles, 3D ...
+// ... new constants for audio, particles, 3D, difficulty, playfield ...
+
+// Difficulty System
+const ENEMY_SHELL_SPEED_MULTIPLIER = 0.6;
+const MIN_AIM_ERROR = 15 * (Math.PI / 180);
+const MAX_AIM_ERROR = 25 * (Math.PI / 180);
+const AIM_IMPROVEMENT_RATE = 0.1;
+function calculateAimError(score) { ... }
 
 // Audio System
 const audioSystem = { ... };
+const engineSound = { ... };
+function updateEngineSound(isMoving) { ... }
 
 // Particle System
 let particles = [];
@@ -619,6 +970,15 @@ function draw3DTank() { ... }
 // AI System
 function hasLineOfSight() { ... }
 function isInFieldOfView() { ... }
+
+// Playfield System
+const PLAYFIELD_WIDTH = 2000;
+const PLAYFIELD_HEIGHT = 2000;
+function applyBoundaryConstraints(entity) { ... }
+function initializeObstacles() { ... }
+
+// Control System
+function handleWASDInput() { ... }
 
 // ... existing game code with modifications ...
 ```
@@ -644,5 +1004,22 @@ function isInFieldOfView() { ... }
 - Implement 3D projection and camera system
 - Convert existing draw functions to 3D
 - Test with all other features enabled
+
+**Phase 5: Difficulty Balancing**
+- Implement aim error calculation system
+- Add enemy shell speed multiplier
+- Test difficulty progression across score ranges
+
+**Phase 6: Control System Redesign**
+- Replace dual-tread controls with WASD
+- Update UI instructions
+- Test movement and rotation feel
+
+**Phase 7: Playfield Expansion**
+- Increase playfield dimensions
+- Add boundary walls and collision
+- Scale obstacle count
+- Widen camera FOV
+- Test spatial awareness and gameplay flow
 
 This phased approach allows incremental testing and reduces risk of breaking existing functionality.
