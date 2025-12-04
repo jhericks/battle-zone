@@ -1,4 +1,4 @@
-// Version: Back-face culling with proper occlusion v1.7
+// Version: Added trapezoidal body with proper Z-axis v2.8
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -419,7 +419,8 @@ function project3D(x, y, z) {
     // Perspective division: project 3D point onto 2D screen
     // The further away (larger depth), the smaller the screen coordinates
     const screenX = (rotatedX / depth) * focalLength + canvas.width / 2;
-    const screenY = (cz / depth) * focalLength + canvas.height / 2;
+    // NEGATE cz because positive Z should go UP, but positive screenY goes DOWN
+    const screenY = (-cz / depth) * focalLength + canvas.height / 2;
     
     return {
         x: screenX,
@@ -509,6 +510,178 @@ function getBoxFacesForRendering(x, y, z, width, height, depth) {
         const centerX = faceVertices.reduce((sum, v) => sum + v[0], 0) / 4;
         const centerY = faceVertices.reduce((sum, v) => sum + v[1], 0) / 4;
         const centerZ = faceVertices.reduce((sum, v) => sum + v[2], 0) / 4;
+        
+        // Calculate face normal using cross product
+        const v0 = faceVertices[0];
+        const v1 = faceVertices[1];
+        const v2 = faceVertices[2];
+        
+        const edge1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+        const edge2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+        
+        const normal = [
+            edge1[1] * edge2[2] - edge1[2] * edge2[1],
+            edge1[2] * edge2[0] - edge1[0] * edge2[2],
+            edge1[0] * edge2[1] - edge1[1] * edge2[0]
+        ];
+        
+        // Vector from face center to camera
+        const toCamera = [camera.x - centerX, camera.y - centerY, camera.z - centerZ];
+        
+        // Dot product: if positive, face is pointing toward camera
+        const dotProduct = normal[0] * toCamera[0] + normal[1] * toCamera[1] + normal[2] * toCamera[2];
+        
+        // Only include front-facing faces
+        if (dotProduct > 0) {
+            const dx = centerX - camera.x;
+            const dy = centerY - camera.y;
+            const dz = centerZ - camera.z;
+            const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            
+            faces.push({
+                distance: distance,
+                projectedVertices: faceDef.indices.map(i => projectedVertices[i]),
+                edges: faceDef.edges,
+                vertices: vertices
+            });
+        }
+    }
+    
+    return faces;
+}
+
+/**
+ * Get tank faces for global depth-sorted rendering with back-face culling
+ * Tank consists of: trapezoidal body, cube turret, rectangular barrel
+ * @param {number} x - Tank X coordinate in world space
+ * @param {number} y - Tank Y coordinate in world space
+ * @param {number} z - Tank Z coordinate in world space (ground level)
+ * @param {number} angle - Tank facing angle in radians
+ * @returns {Array} Array of face objects with distance and projected vertices (only front-facing)
+ */
+function getTankFacesForRendering(x, y, z, angle) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const faces = [];
+    
+    // Body dimensions - Trapezoidal prism (wider at bottom for treads)
+    const bodyWidth = 25;
+    const bodyBottomDepth = 35;  // Wider at bottom (treads)
+    const bodyTopDepth = 28;     // Narrower at top
+    const bodyHeight = 12;
+    
+    // Turret dimensions
+    const turretWidth = 14;
+    const turretDepth = 12;
+    const turretHeight = 10;
+    
+    // Barrel dimensions
+    const barrelLength = 25;
+    const barrelWidth = 3;
+    const barrelHeight = 3;
+    
+    // Helper function to rotate and translate a point
+    const transform = (localX, localY, localZ) => {
+        const rotatedX = x + localX * cos - localY * sin;
+        const rotatedY = y + localX * sin + localY * cos;
+        return [rotatedX, rotatedY, z + localZ];
+    };
+    
+    // === BODY (Trapezoidal prism - wider at bottom) ===
+    const bodyVertices = [
+        // Bottom face (z=0, on ground, WIDER for treads)
+        transform(-bodyWidth/2, -bodyBottomDepth/2, 0),
+        transform(bodyWidth/2, -bodyBottomDepth/2, 0),
+        transform(bodyWidth/2, bodyBottomDepth/2, 0),
+        transform(-bodyWidth/2, bodyBottomDepth/2, 0),
+        // Top face (z=bodyHeight, NARROWER)
+        transform(-bodyWidth/2, -bodyTopDepth/2, bodyHeight),
+        transform(bodyWidth/2, -bodyTopDepth/2, bodyHeight),
+        transform(bodyWidth/2, bodyTopDepth/2, bodyHeight),
+        transform(-bodyWidth/2, bodyTopDepth/2, bodyHeight)
+    ];
+    
+    const bodyFaces = [
+        { indices: [0, 1, 5, 4], edges: [[0,1], [1,5], [5,4], [4,0]] }, // Front (trapezoid)
+        { indices: [1, 2, 6, 5], edges: [[1,2], [2,6], [6,5], [5,1]] }, // Right (trapezoid)
+        { indices: [2, 3, 7, 6], edges: [[2,3], [3,7], [7,6], [6,2]] }, // Back (trapezoid)
+        { indices: [3, 0, 4, 7], edges: [[3,0], [0,4], [4,7], [7,3]] }, // Left (trapezoid)
+        { indices: [4, 5, 6, 7], edges: [[4,5], [5,6], [6,7], [7,4]] }, // Top (rectangle)
+        { indices: [3, 2, 1, 0], edges: [[3,2], [2,1], [1,0], [0,3]] }  // Bottom (rectangle)
+    ];
+    
+    faces.push(...processFaces(bodyVertices, bodyFaces));
+    
+    // === TURRET (Rectangular box on top of body) ===
+    // Turret sits at z=bodyHeight (on top of body)
+    const turretZ = bodyHeight;
+    const turretVertices = [
+        // Bottom face
+        transform(-turretWidth/2, -turretDepth/2, turretZ),
+        transform(turretWidth/2, -turretDepth/2, turretZ),
+        transform(turretWidth/2, turretDepth/2, turretZ),
+        transform(-turretWidth/2, turretDepth/2, turretZ),
+        // Top face
+        transform(-turretWidth/2, -turretDepth/2, turretZ + turretHeight),
+        transform(turretWidth/2, -turretDepth/2, turretZ + turretHeight),
+        transform(turretWidth/2, turretDepth/2, turretZ + turretHeight),
+        transform(-turretWidth/2, turretDepth/2, turretZ + turretHeight)
+    ];
+    
+    const turretFaces = [
+        { indices: [0, 1, 5, 4], edges: [[0,1], [1,5], [5,4], [4,0]] }, // Front
+        { indices: [1, 2, 6, 5], edges: [[1,2], [2,6], [6,5], [5,1]] }, // Right
+        { indices: [2, 3, 7, 6], edges: [[2,3], [3,7], [7,6], [6,2]] }, // Back
+        { indices: [3, 0, 4, 7], edges: [[3,0], [0,4], [4,7], [7,3]] }, // Left
+        { indices: [4, 5, 6, 7], edges: [[4,5], [5,6], [6,7], [7,4]] }, // Top
+        { indices: [3, 2, 1, 0], edges: [[3,2], [2,1], [1,0], [0,3]] }  // Bottom
+    ];
+    
+    faces.push(...processFaces(turretVertices, turretFaces));
+    
+    // === BARREL (Thin rectangular prism extending forward) ===
+    const barrelZ = turretZ + turretHeight / 2 - barrelHeight / 2;
+    const barrelVertices = [
+        // Back face (at turret)
+        transform(-barrelWidth/2, 0, barrelZ),
+        transform(barrelWidth/2, 0, barrelZ),
+        transform(barrelWidth/2, 0, barrelZ + barrelHeight),
+        transform(-barrelWidth/2, 0, barrelZ + barrelHeight),
+        // Front face (extended forward)
+        transform(-barrelWidth/2, barrelLength, barrelZ),
+        transform(barrelWidth/2, barrelLength, barrelZ),
+        transform(barrelWidth/2, barrelLength, barrelZ + barrelHeight),
+        transform(-barrelWidth/2, barrelLength, barrelZ + barrelHeight)
+    ];
+    
+    const barrelFaces = [
+        { indices: [4, 5, 6, 7], edges: [[4,5], [5,6], [6,7], [7,4]] }, // Front (tip)
+        { indices: [1, 5, 6, 2], edges: [[1,5], [5,6], [6,2], [2,1]] }, // Right
+        { indices: [0, 4, 7, 3], edges: [[0,4], [4,7], [7,3], [3,0]] }, // Left
+        { indices: [2, 6, 7, 3], edges: [[2,6], [6,7], [7,3], [3,2]] }, // Top
+        { indices: [0, 1, 5, 4], edges: [[0,1], [1,5], [5,4], [4,0]] }  // Bottom
+    ];
+    
+    faces.push(...processFaces(barrelVertices, barrelFaces));
+    
+    return faces;
+}
+
+/**
+ * Helper function to process faces with back-face culling
+ * @param {Array} vertices - Array of 3D vertices
+ * @param {Array} faceDefinitions - Array of face definitions with indices and edges
+ * @returns {Array} Array of visible faces with distance and projected vertices
+ */
+function processFaces(vertices, faceDefinitions) {
+    const projectedVertices = vertices.map(v => project3D(v[0], v[1], v[2]));
+    const faces = [];
+    
+    for (let faceDef of faceDefinitions) {
+        const faceVertices = faceDef.indices.map(i => vertices[i]);
+        const centerX = faceVertices.reduce((sum, v) => sum + v[0], 0) / faceVertices.length;
+        const centerY = faceVertices.reduce((sum, v) => sum + v[1], 0) / faceVertices.length;
+        const centerZ = faceVertices.reduce((sum, v) => sum + v[2], 0) / faceVertices.length;
         
         // Calculate face normal using cross product
         const v0 = faceVertices[0];
@@ -1432,6 +1605,9 @@ function updatePlayerMovement() {
 function updateEnemy() {
     if (!enemy) return;
     
+    // TEMPORARY: Disable enemy AI for tank inspection
+    return;
+    
     // Check line of sight to player
     const hasLOS = hasLineOfSight(enemy, player, obstacles);
     
@@ -1610,10 +1786,14 @@ function checkCollisions() {
     if (enemyShell) {
         const dist = Math.hypot(enemyShell.x - player.x, enemyShell.y - player.y);
         if (dist < TANK_SIZE) {
-            audioSystem.playExplosion();
-            createDebris(player.x, player.y, 12 + Math.floor(Math.random() * 5)); // 12-16 particles
-            audioSystem.playGameOver();
-            gameState = 'gameOver';
+            // TEMPORARY: Disable player death for tank inspection
+            // audioSystem.playExplosion();
+            // createDebris(player.x, player.y, 12 + Math.floor(Math.random() * 5)); // 12-16 particles
+            // audioSystem.playGameOver();
+            // gameState = 'gameOver';
+            
+            // Just destroy the shell
+            enemyShell = null;
         }
     }
 }
@@ -1779,8 +1959,8 @@ function draw3DGame() {
                 faces = getBoxFacesForRendering(oCenterX, oCenterY, 0, entity.data.width, 40, entity.data.height);
                 break;
             case 'enemy':
-                // For tank, just use body box for now
-                faces = getBoxFacesForRendering(entity.data.x, entity.data.y, 0, 20, 10, 15);
+                // Get tank faces with proper geometry
+                faces = getTankFacesForRendering(entity.data.x, entity.data.y, 0, entity.data.angle);
                 break;
         }
         allFaces.push(...faces);

@@ -175,7 +175,7 @@
 - [x] 16. Final Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-a- [x] 17. Implement continuous engine sound system
+- [x] 17. Implement continuous engine sound system
   - Create engineSound object with oscillator and gain nodes
   - Implement updateEngineSound(isMoving) function
   - Add smooth frequency/gain transitions using linear ramps
