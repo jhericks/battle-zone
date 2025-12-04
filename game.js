@@ -1061,10 +1061,67 @@ function init() {
 }
 
 function spawnEnemy() {
+    // Randomize enemy spawn position to prevent spawn camping
+    const MIN_DISTANCE_FROM_PLAYER = 400; // Minimum distance from player
+    const MIN_DISTANCE_FROM_OBSTACLES = 100; // Minimum distance from obstacles
+    const MARGIN = 150; // Margin from playfield edges
+    const MAX_ATTEMPTS = 50; // Prevent infinite loops
+    
+    let spawnX, spawnY, validPosition;
+    let attempts = 0;
+    
+    do {
+        validPosition = true;
+        attempts++;
+        
+        // Generate random position within playfield bounds
+        spawnX = MARGIN + Math.random() * (PLAYFIELD_WIDTH - MARGIN * 2);
+        spawnY = MARGIN + Math.random() * (PLAYFIELD_HEIGHT - MARGIN * 2);
+        
+        // Check distance from player
+        const distToPlayer = Math.hypot(spawnX - player.x, spawnY - player.y);
+        if (distToPlayer < MIN_DISTANCE_FROM_PLAYER) {
+            validPosition = false;
+            continue;
+        }
+        
+        // Check distance from obstacles
+        for (let obs of obstacles) {
+            const obsCenterX = obs.x + obs.width / 2;
+            const obsCenterY = obs.y + obs.height / 2;
+            const distToObs = Math.hypot(spawnX - obsCenterX, spawnY - obsCenterY);
+            
+            if (distToObs < MIN_DISTANCE_FROM_OBSTACLES) {
+                validPosition = false;
+                break;
+            }
+        }
+        
+    } while (!validPosition && attempts < MAX_ATTEMPTS);
+    
+    // If we couldn't find a valid position after max attempts, use a fallback position
+    if (!validPosition) {
+        // Spawn in opposite corner from player
+        if (player.x < PLAYFIELD_WIDTH / 2) {
+            spawnX = PLAYFIELD_WIDTH - 300;
+        } else {
+            spawnX = 300;
+        }
+        
+        if (player.y < PLAYFIELD_HEIGHT / 2) {
+            spawnY = PLAYFIELD_HEIGHT - 300;
+        } else {
+            spawnY = 300;
+        }
+    }
+    
+    // Calculate angle to face toward player
+    const angleToPlayer = Math.atan2(player.y - spawnY, player.x - spawnX);
+    
     enemy = {
-        x: PLAYFIELD_WIDTH / 2,
-        y: 200,
-        angle: Math.PI / 2, // facing down
+        x: spawnX,
+        y: spawnY,
+        angle: angleToPlayer, // Face toward player initially
         fireCooldown: ENEMY_FIRE_COOLDOWN,
         state: 'idle', // 'idle', 'hunting', 'searching'
         searchTimeout: 0, // Frames to search before giving up
