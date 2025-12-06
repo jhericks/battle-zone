@@ -183,7 +183,7 @@
   - Ensure tank renders right-side up with treads on ground
   - _Requirements: 3.5, 3.7, 3.9, 3.10, 3.11_
 
-- [ ] 14.3 Re-enable enemy AI and player vulnerability
+- [x] 14.3 Re-enable enemy AI and player vulnerability
   - Remove early return in updateEnemy() to restore enemy movement
   - Uncomment game over logic when enemy shell hits player
   - Test that enemy tank moves and fires correctly

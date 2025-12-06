@@ -5,7 +5,7 @@ const ctx = canvas.getContext('2d');
 // Game constants
 const PURPLE = '#a855f7';
 const TANK_SIZE = 30;
-const SHELL_SIZE = 20;
+const SHELL_SIZE = 10; // Half the original size for better visibility
 const OBSTACLE_SIZE = 40;
 const ROTATION_SPEED = 0.007;
 const MOVE_SPEED = 0.7;
@@ -640,18 +640,20 @@ function getTankFacesForRendering(x, y, z, angle) {
     faces.push(...processFaces(turretVertices, turretFaces));
     
     // === BARREL (Thin rectangular prism extending forward) ===
+    // Barrel extends in positive X direction in local space
+    // When rotated by angle, it points in the direction of angle
     const barrelZ = turretZ + turretHeight / 2 - barrelHeight / 2;
     const barrelVertices = [
         // Back face (at turret)
-        transform(-barrelWidth/2, 0, barrelZ),
-        transform(barrelWidth/2, 0, barrelZ),
-        transform(barrelWidth/2, 0, barrelZ + barrelHeight),
-        transform(-barrelWidth/2, 0, barrelZ + barrelHeight),
-        // Front face (extended forward)
-        transform(-barrelWidth/2, barrelLength, barrelZ),
-        transform(barrelWidth/2, barrelLength, barrelZ),
-        transform(barrelWidth/2, barrelLength, barrelZ + barrelHeight),
-        transform(-barrelWidth/2, barrelLength, barrelZ + barrelHeight)
+        transform(0, -barrelWidth/2, barrelZ),
+        transform(0, barrelWidth/2, barrelZ),
+        transform(0, barrelWidth/2, barrelZ + barrelHeight),
+        transform(0, -barrelWidth/2, barrelZ + barrelHeight),
+        // Front face (extended forward in positive X direction)
+        transform(barrelLength, -barrelWidth/2, barrelZ),
+        transform(barrelLength, barrelWidth/2, barrelZ),
+        transform(barrelLength, barrelWidth/2, barrelZ + barrelHeight),
+        transform(barrelLength, -barrelWidth/2, barrelZ + barrelHeight)
     ];
     
     const barrelFaces = [
@@ -1511,9 +1513,12 @@ function update() {
     
     // Fire player shell
     if (keys[' '] && !playerShell) {
+        // Spawn shell from the tip of the barrel (barrel extends 25 units in direction of angle)
+        const barrelTipDistance = 25 + TANK_SIZE / 2; // Barrel extends 25 units from center
+        
         playerShell = {
-            x: player.x + Math.cos(player.angle) * TANK_SIZE,
-            y: player.y + Math.sin(player.angle) * TANK_SIZE,
+            x: player.x + Math.cos(player.angle) * barrelTipDistance,
+            y: player.y + Math.sin(player.angle) * barrelTipDistance,
             vx: Math.cos(player.angle) * SHELL_SPEED,
             vy: Math.sin(player.angle) * SHELL_SPEED
         };
@@ -1604,9 +1609,6 @@ function updatePlayerMovement() {
 
 function updateEnemy() {
     if (!enemy) return;
-    
-    // TEMPORARY: Disable enemy AI for tank inspection
-    return;
     
     // Check line of sight to player
     const hasLOS = hasLineOfSight(enemy, player, obstacles);
@@ -1704,9 +1706,12 @@ function updateEnemy() {
         // Apply enemy shell speed multiplier
         const enemyShellSpeed = SHELL_SPEED * ENEMY_SHELL_SPEED_MULTIPLIER;
         
+        // Spawn shell from the tip of the barrel (barrel length is 25 units)
+        const barrelTipDistance = 25 + TANK_SIZE / 2; // Barrel extends 25 units from center
+        
         enemyShell = {
-            x: enemy.x + Math.cos(firingAngle) * TANK_SIZE,
-            y: enemy.y + Math.sin(firingAngle) * TANK_SIZE,
+            x: enemy.x + Math.cos(firingAngle) * barrelTipDistance,
+            y: enemy.y + Math.sin(firingAngle) * barrelTipDistance,
             vx: Math.cos(firingAngle) * enemyShellSpeed,
             vy: Math.sin(firingAngle) * enemyShellSpeed
         };
@@ -1786,13 +1791,11 @@ function checkCollisions() {
     if (enemyShell) {
         const dist = Math.hypot(enemyShell.x - player.x, enemyShell.y - player.y);
         if (dist < TANK_SIZE) {
-            // TEMPORARY: Disable player death for tank inspection
-            // audioSystem.playExplosion();
-            // createDebris(player.x, player.y, 12 + Math.floor(Math.random() * 5)); // 12-16 particles
-            // audioSystem.playGameOver();
-            // gameState = 'gameOver';
-            
-            // Just destroy the shell
+            audioSystem.playExplosion();
+            createDebris(player.x, player.y, 12 + Math.floor(Math.random() * 5)); // 12-16 particles
+            audioSystem.playGameOver();
+            audioSystem.stopEngineSound();
+            gameState = 'gameOver';
             enemyShell = null;
         }
     }
@@ -2004,7 +2007,10 @@ function draw3DGame() {
     // 5. Draw particles (rendered separately with proper depth)
     drawParticles();
     
-    // 6. Draw HUD elements (score) in 2D overlay
+    // 6. Draw aiming reticule (crosshair in center of screen)
+    drawReticule();
+    
+    // 7. Draw HUD elements (score) in 2D overlay
     ctx.fillStyle = PURPLE;
     ctx.font = '24px Courier New';
     ctx.textAlign = 'left';
@@ -2015,6 +2021,47 @@ function draw3DGame() {
     const angleDegrees = Math.round((player.angle * 180 / Math.PI + 360) % 360);
     ctx.fillText('Angle: ' + angleDegrees + '°', 20, 70);
     ctx.fillText('Pos: ' + Math.round(player.x) + ', ' + Math.round(player.y), 20, 90);
+}
+
+/**
+ * Draw aiming reticule (crosshair) in center of screen
+ * Uses fainter lines than the rest of the game
+ */
+function drawReticule() {
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const size = 20; // Length of each crosshair line (increased from 15)
+    const gap = 6;   // Gap from center (slightly larger)
+    
+    // Use more visible purple color (increased opacity)
+    ctx.strokeStyle = PURPLE + 'CC'; // 80% opacity (was 37%)
+    ctx.lineWidth = 2; // Same as other game elements
+    
+    ctx.beginPath();
+    
+    // Horizontal line (left)
+    ctx.moveTo(centerX - gap - size, centerY);
+    ctx.lineTo(centerX - gap, centerY);
+    
+    // Horizontal line (right)
+    ctx.moveTo(centerX + gap, centerY);
+    ctx.lineTo(centerX + gap + size, centerY);
+    
+    // Vertical line (top)
+    ctx.moveTo(centerX, centerY - gap - size);
+    ctx.lineTo(centerX, centerY - gap);
+    
+    // Vertical line (bottom)
+    ctx.moveTo(centerX, centerY + gap);
+    ctx.lineTo(centerX, centerY + gap + size);
+    
+    ctx.stroke();
+    
+    // Optional: Add a small center dot
+    ctx.fillStyle = PURPLE + 'AA'; // 67% opacity for the dot (was 25%)
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
+    ctx.fill();
 }
 
 /**
